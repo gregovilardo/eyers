@@ -1,0 +1,11 @@
+[package]
+name = "eyers"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gtk = { version = "0.10.3", package = "gtk4", features = ["v4_18"] }
+pdfium-render = "0.8.37"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

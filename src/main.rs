@@ -161,9 +161,11 @@ fn extract_word_at_index(full_text: &str, idx: usize) -> Option<ExtractedWord> {
     let start = find_word_start(&chars_vec, idx);
     let end = find_word_end(&chars_vec, idx);
 
+    if start > end {
+        return None;
+    }
     let original: String = chars_vec[start..end].iter().collect();
     let lowercase = original.to_lowercase();
-
     Some(ExtractedWord {
         original,
         lowercase,
@@ -293,7 +295,7 @@ fn create_definition_popover(picture: &Picture, x: f64, y: f64) -> (Popover, Lab
     let popover = Popover::builder().has_arrow(true).build();
     popover.set_parent(picture);
     popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-    popover.set_autohide(true);
+    popover.set_autohide(false);
     popover.set_position(gtk::PositionType::Bottom);
 
     let label = create_definition_label();
@@ -428,20 +430,10 @@ fn process_click_on_page(page: &PdfPage, click: &ClickData, picture: &Picture) {
 
     let full_text = text_page.all();
     if let Some(word) = extract_word_at_index(&full_text, char_idx) {
-        show_definition_popover(picture, click, word);
+        let (popover, label) = create_definition_popover(picture, click.screen_x, click.screen_y);
+        popover.popup();
+        spawn_definition_fetch(word, label);
     }
-}
-
-fn show_definition_popover(picture: &Picture, click: &ClickData, word: ExtractedWord) {
-    println!(
-        "Fetching definition for: {} (original: {})",
-        word.lowercase, word.original
-    );
-
-    let (popover, label) = create_definition_popover(picture, click.screen_x, click.screen_y);
-    popover.set_focusable(false);
-    popover.popup();
-    spawn_definition_fetch(word, label);
 }
 
 // ============================================================================

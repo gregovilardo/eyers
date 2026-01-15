@@ -1,9 +1,10 @@
+use glib::Properties;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{Box, GestureClick, Orientation, Picture};
 use pdfium_render::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 
 use crate::services::pdf_text::{
@@ -15,20 +16,15 @@ use crate::widgets::DefinitionPopover;
 mod imp {
     use super::*;
 
+    #[derive(Properties, Default)]
+    #[properties(wrapper_type = super::PdfView)]
     pub struct PdfView {
         pub document: RefCell<Option<PdfDocument<'static>>>,
         pub pdfium: RefCell<Option<&'static Pdfium>>,
         pub current_popover: RefCell<Option<DefinitionPopover>>,
-    }
 
-    impl Default for PdfView {
-        fn default() -> Self {
-            Self {
-                document: RefCell::new(None),
-                pdfium: RefCell::new(None),
-                current_popover: RefCell::new(None),
-            }
-        }
+        #[property(get, set, default = true)]
+        pub definitions_enabled: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -38,6 +34,7 @@ mod imp {
         type ParentType = Box;
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for PdfView {
         fn constructed(&self) {
             self.parent_constructed();
@@ -159,6 +156,11 @@ impl PdfView {
     fn handle_page_click(&self, x: f64, y: f64, page_index: usize, picture: &Picture) {
         // Close any existing popover first
         self.close_current_popover();
+
+        // Check if definitions are enabled
+        if !self.definitions_enabled() {
+            return;
+        }
 
         let doc_borrow = self.imp().document.borrow();
         let doc = match doc_borrow.as_ref() {

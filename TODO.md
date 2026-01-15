@@ -1,0 +1,3 @@
+- Make it work in spanish also.
+- Be able to translate words
+- Be able to translate sentences

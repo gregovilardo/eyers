@@ -2,17 +2,18 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{ApplicationWindow, Button, FileDialog, HeaderBar, PolicyType, ScrolledWindow};
+use gtk::{ApplicationWindow, PolicyType, ScrolledWindow};
 use pdfium_render::prelude::*;
 use std::cell::RefCell;
 use std::path::Path;
 
-use crate::widgets::PdfView;
+use crate::widgets::{EyersHeaderBar, PdfView};
 
 mod imp {
     use super::*;
 
     pub struct EyersWindow {
+        pub header_bar: EyersHeaderBar,
         pub pdf_view: PdfView,
         pub pdfium: RefCell<Option<&'static Pdfium>>,
     }
@@ -20,6 +21,7 @@ mod imp {
     impl Default for EyersWindow {
         fn default() -> Self {
             Self {
+                header_bar: EyersHeaderBar::new(),
                 pdf_view: PdfView::new(),
                 pdfium: RefCell::new(None),
             }
@@ -76,43 +78,43 @@ impl EyersWindow {
     }
 
     fn setup_widgets(&self) {
-        let header_bar = self.create_header_bar();
-        self.set_titlebar(Some(&header_bar));
+        let imp = self.imp();
 
+        // Setup header bar (use widget() to get the actual HeaderBar)
+        self.set_titlebar(Some(imp.header_bar.widget()));
+        self.setup_open_button();
+
+        // Bind header bar's definitions-enabled to pdf_view's definitions-enabled
+        imp.header_bar
+            .bind_property("definitions-enabled", &imp.pdf_view, "definitions-enabled")
+            .sync_create()
+            .build();
+
+        // Setup scrolled window with pdf view
         let scrolled_window = ScrolledWindow::builder()
             .hscrollbar_policy(PolicyType::Automatic)
             .vscrollbar_policy(PolicyType::Automatic)
-            .child(&self.imp().pdf_view)
+            .child(&imp.pdf_view)
             .build();
 
         self.set_child(Some(&scrolled_window));
     }
 
-    fn create_header_bar(&self) -> HeaderBar {
-        let header_bar = HeaderBar::builder()
-            .title_widget(&gtk::Label::new(Some("Eyers PDF")))
-            .show_title_buttons(true)
-            .build();
-
-        let open_button = Button::builder().label("Open PDF").build();
-        self.setup_open_button(&open_button);
-        header_bar.pack_start(&open_button);
-
-        header_bar
-    }
-
-    fn setup_open_button(&self, button: &Button) {
+    fn setup_open_button(&self) {
         let window_weak = self.downgrade();
 
-        button.connect_clicked(move |_| {
-            if let Some(window) = window_weak.upgrade() {
-                window.show_open_dialog();
-            }
-        });
+        self.imp()
+            .header_bar
+            .open_button()
+            .connect_clicked(move |_| {
+                if let Some(window) = window_weak.upgrade() {
+                    window.show_open_dialog();
+                }
+            });
     }
 
     fn show_open_dialog(&self) {
-        let dialog = FileDialog::builder().title("Select a PDF").build();
+        let dialog = gtk::FileDialog::builder().title("Select a PDF").build();
         let window_weak = self.downgrade();
 
         dialog.open(Some(self), None::<&gio::Cancellable>, move |result| {
@@ -136,6 +138,10 @@ impl EyersWindow {
         if let Err(e) = self.imp().pdf_view.load_pdf(path) {
             eprintln!("{}", e);
         }
+    }
+
+    pub fn header_bar(&self) -> &EyersHeaderBar {
+        &self.imp().header_bar
     }
 
     pub fn pdf_view(&self) -> &PdfView {

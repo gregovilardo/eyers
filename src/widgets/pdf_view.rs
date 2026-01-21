@@ -68,9 +68,6 @@ mod imp {
                     Signal::builder("translate-requested")
                         .param_types([String::static_type()])
                         .build(),
-                    Signal::builder("scroll-to-page")
-                        .param_types([u32::static_type()])
-                        .build(),
                 ]
             })
         }
@@ -358,7 +355,31 @@ impl PdfView {
     }
 
     pub fn scroll_to_page(&self, page_index: u16) {
-        self.emit_by_name::<()>("scroll-to-page", &[&(page_index as u32)]);
+        if let Some(scrolled) = self.find_scrolled_window() {
+            let adjustment = scrolled.vadjustment();
+            let page_pictures = self.page_pictures();
+
+            if let Some(picture) = page_pictures.get(page_index as usize) {
+                let widget = picture.upcast_ref::<gtk::Widget>();
+                let natural_size = widget.preferred_size().1;
+                let page_height = natural_size.height() as f64;
+                let spacing = 10.0;
+                let page_size = adjustment.page_size();
+
+                let target_y = page_height * page_index as f64 + spacing * page_index as f64;
+                let max_value = adjustment.upper() - page_size;
+
+                let new_value = if target_y < 0.0 {
+                    0.0
+                } else if target_y > max_value {
+                    max_value
+                } else {
+                    target_y
+                };
+
+                adjustment.set_value(new_value);
+            }
+        }
     }
 
     pub fn page_picture(&self, page_index: u16) -> Option<Picture> {

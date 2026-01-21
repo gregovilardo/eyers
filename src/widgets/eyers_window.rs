@@ -190,52 +190,13 @@ impl EyersWindow {
         });
 
         let pdf_view = imp.pdf_view.clone();
-        let paned = imp.paned.borrow().clone();
         imp.toc_panel.connect_closure(
             "chapter-selected",
             false,
             glib::closure_local!(move |_panel: &TocPanel, page_index: u32| {
-                let page_index = page_index as u16;
-                pdf_view.scroll_to_page(page_index);
-                if let Some(ref paned) = paned
-                    && let Some(scrolled_window) = paned
-                        .start_child()
-                        .and_then(|w| w.downcast::<ScrolledWindow>().ok())
-                {
-                    Self::scroll_scrolled_window_to_page(&scrolled_window, &pdf_view, page_index);
-                }
+                pdf_view.scroll_to_page(page_index as u16);
             }),
         );
-    }
-
-    fn scroll_scrolled_window_to_page(
-        scrolled_window: &ScrolledWindow,
-        pdf_view: &PdfView,
-        page_index: u16,
-    ) {
-        let adjustment = scrolled_window.vadjustment();
-        let page_pictures = pdf_view.page_pictures();
-
-        if let Some(picture) = page_pictures.get(page_index as usize) {
-            let widget = picture.upcast_ref::<gtk::Widget>();
-            let natural_size = widget.preferred_size().1;
-            let page_height = natural_size.height() as f64;
-            let spacing = 10.0;
-            let page_size = adjustment.page_size();
-
-            let target_y = page_height * page_index as f64 + spacing * page_index as f64;
-            let max_value = adjustment.upper() - page_size;
-
-            let new_value = if target_y < 0.0 {
-                0.0
-            } else if target_y > max_value {
-                max_value
-            } else {
-                target_y
-            };
-
-            adjustment.set_value(new_value);
-        }
     }
 
     fn setup_keyboard_controller(&self) {
@@ -287,7 +248,8 @@ impl EyersWindow {
 
         if !is_visible {
             imp.toc_panel.grab_focus();
-            imp.toc_panel.select_first();
+            let current_page = imp.pdf_view.current_page();
+            imp.toc_panel.select_current_chapter(current_page);
         }
     }
 

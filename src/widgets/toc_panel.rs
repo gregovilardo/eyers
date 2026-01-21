@@ -167,6 +167,7 @@ impl TocPanel {
             .margin_end(12)
             .margin_top(4)
             .margin_bottom(4)
+            .name(entry.page_index.to_string())
             .build();
 
         let label = Label::new(Some(&entry.title));
@@ -182,6 +183,27 @@ impl TocPanel {
         imp.flat_entries.borrow_mut().push(FlatEntry {
             page_index: entry.page_index,
         });
+    }
+
+    pub fn select_current_chapter(&self, page: u16) {
+        let imp = self.imp();
+        let flat_entries = imp.flat_entries.borrow();
+
+        // Find the chapter with the highest page_index that is still <= current page
+        let mut best_match: Option<(usize, &FlatEntry)> = None;
+
+        for (pos, entry) in flat_entries.iter().enumerate() {
+            if entry.page_index <= page {
+                best_match = Some((pos, entry));
+            }
+        }
+
+        if let Some((pos, _)) = best_match {
+            if let Some(row) = imp.list_box.row_at_index(pos as i32) {
+                imp.list_box.select_row(Some(&row));
+                row.grab_focus();
+            }
+        }
     }
 
     pub fn select_first(&self) {

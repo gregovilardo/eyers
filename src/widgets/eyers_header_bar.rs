@@ -14,9 +14,13 @@ mod imp {
         pub header_bar: HeaderBar,
         pub open_button: Button,
         pub definitions_toggle: ToggleButton,
+        pub translate_toggle: ToggleButton,
 
-        #[property(get, set, default = true)]
+        #[property(get, set, default = false)]
         pub definitions_enabled: Cell<bool>,
+
+        #[property(get, set, default = false)]
+        pub translate_enabled: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -56,17 +60,51 @@ impl EyersHeaderBar {
         imp.open_button.set_label("Open PDF");
         imp.header_bar.pack_start(&imp.open_button);
 
+        // Translate toggle button
+        imp.translate_toggle.set_label("Translate");
+        imp.translate_toggle.set_active(false);
+        imp.header_bar.pack_end(&imp.translate_toggle);
+
         // Definitions toggle button
         imp.definitions_toggle.set_label("Definitions");
         imp.definitions_toggle.set_active(false);
         imp.header_bar.pack_end(&imp.definitions_toggle);
 
-        // Bind toggle button's "active" to our "definitions-enabled" property (bidirectional)
+        // Bind toggle buttons to properties (bidirectional)
         imp.definitions_toggle
             .bind_property("active", self, "definitions-enabled")
             .bidirectional()
             .sync_create()
             .build();
+
+        imp.translate_toggle
+            .bind_property("active", self, "translate-enabled")
+            .bidirectional()
+            .sync_create()
+            .build();
+
+        // Setup mutual exclusion between toggles
+        self.setup_mutual_exclusion();
+    }
+
+    fn setup_mutual_exclusion(&self) {
+        let imp = self.imp();
+
+        // When definitions is toggled ON, turn off translate
+        let translate_toggle = imp.translate_toggle.clone();
+        imp.definitions_toggle.connect_toggled(move |btn| {
+            if btn.is_active() {
+                translate_toggle.set_active(false);
+            }
+        });
+
+        // When translate is toggled ON, turn off definitions
+        let definitions_toggle = imp.definitions_toggle.clone();
+        imp.translate_toggle.connect_toggled(move |btn| {
+            if btn.is_active() {
+                definitions_toggle.set_active(false);
+            }
+        });
     }
 
     /// Returns the HeaderBar widget to be used with set_titlebar()
@@ -80,6 +118,10 @@ impl EyersHeaderBar {
 
     pub fn definitions_toggle(&self) -> &ToggleButton {
         &self.imp().definitions_toggle
+    }
+
+    pub fn translate_toggle(&self) -> &ToggleButton {
+        &self.imp().translate_toggle
     }
 }
 

@@ -2,12 +2,12 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{ApplicationWindow, PolicyType, ScrolledWindow};
+use gtk::{ApplicationWindow, Box, Orientation, PolicyType, ScrolledWindow};
 use pdfium_render::prelude::*;
 use std::cell::RefCell;
 use std::path::Path;
 
-use crate::widgets::{EyersHeaderBar, PdfView};
+use crate::widgets::{EyersHeaderBar, PdfView, TranslationPanel};
 
 mod imp {
     use super::*;
@@ -15,6 +15,7 @@ mod imp {
     pub struct EyersWindow {
         pub header_bar: EyersHeaderBar,
         pub pdf_view: PdfView,
+        pub translation_panel: TranslationPanel,
         pub pdfium: RefCell<Option<&'static Pdfium>>,
     }
 
@@ -23,6 +24,7 @@ mod imp {
             Self {
                 header_bar: EyersHeaderBar::new(),
                 pdf_view: PdfView::new(),
+                translation_panel: TranslationPanel::new(),
                 pdfium: RefCell::new(None),
             }
         }
@@ -80,24 +82,66 @@ impl EyersWindow {
     fn setup_widgets(&self) {
         let imp = self.imp();
 
-        // Setup header bar (use widget() to get the actual HeaderBar)
+        // Setup header bar
         self.set_titlebar(Some(imp.header_bar.widget()));
         self.setup_open_button();
 
-        // Bind header bar's definitions-enabled to pdf_view's definitions-enabled
+        // Bind header bar properties to pdf_view properties
         imp.header_bar
             .bind_property("definitions-enabled", &imp.pdf_view, "definitions-enabled")
             .sync_create()
             .build();
 
-        // Setup scrolled window with pdf view
+        imp.header_bar
+            .bind_property("translate-enabled", &imp.pdf_view, "translate-enabled")
+            .sync_create()
+            .build();
+
+        // Main content layout: vertical box with scrolled PDF view and translation panel
+        let main_box = Box::builder().orientation(Orientation::Vertical).build();
+
+        // Scrolled window with PDF view (expands to fill available space)
         let scrolled_window = ScrolledWindow::builder()
             .hscrollbar_policy(PolicyType::Automatic)
             .vscrollbar_policy(PolicyType::Automatic)
+            .vexpand(true)
             .child(&imp.pdf_view)
             .build();
 
-        self.set_child(Some(&scrolled_window));
+        main_box.append(&scrolled_window);
+
+        // Translation panel (hidden by default)
+        imp.translation_panel.set_visible(false);
+        main_box.append(&imp.translation_panel);
+
+        self.set_child(Some(&main_box));
+
+        // Setup translation panel connections
+        self.setup_translation_panel();
+    }
+
+    fn setup_translation_panel(&self) {
+        let imp = self.imp();
+
+        // Close button hides panel
+        let panel = imp.translation_panel.clone();
+        imp.translation_panel
+            .close_button()
+            .connect_clicked(move |_| {
+                panel.set_visible(false);
+                panel.clear();
+            });
+
+        // Connect pdf_view's translate-requested signal to translation panel
+        let panel = imp.translation_panel.clone();
+        imp.pdf_view.connect_closure(
+            "translate-requested",
+            false,
+            glib::closure_local!(move |_view: &PdfView, text: &str| {
+                panel.set_visible(true);
+                panel.translate(text.to_string());
+            }),
+        );
     }
 
     fn setup_open_button(&self) {
@@ -146,5 +190,9 @@ impl EyersWindow {
 
     pub fn pdf_view(&self) -> &PdfView {
         &self.imp().pdf_view
+    }
+
+    pub fn translation_panel(&self) -> &TranslationPanel {
+        &self.imp().translation_panel
     }
 }

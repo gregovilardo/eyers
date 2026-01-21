@@ -3,24 +3,35 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::sync::OnceLock;
 
 use crate::services::bookmarks::BookmarkEntry;
-
-#[derive(Clone, Debug)]
-struct FlatEntry {
-    page_index: u16,
-}
 
 mod imp {
     use super::*;
 
     #[derive(Default)]
+    pub struct TocEntryRow {
+        pub page_index: Cell<u16>,
+        pub depth: Cell<usize>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for TocEntryRow {
+        const NAME: &'static str = "TocEntryRow";
+        type Type = super::TocEntryRow;
+        type ParentType = ListBoxRow;
+    }
+
+    impl ObjectImpl for TocEntryRow {}
+    impl WidgetImpl for TocEntryRow {}
+    impl ListBoxRowImpl for TocEntryRow {}
+
+    #[derive(Default)]
     pub struct TocPanel {
         pub list_box: ListBox,
         pub close_button: Button,
-        pub flat_entries: RefCell<Vec<FlatEntry>>,
     }
 
     #[glib::object_subclass]
@@ -50,6 +61,46 @@ mod imp {
 
     impl WidgetImpl for TocPanel {}
     impl BoxImpl for TocPanel {}
+}
+
+glib::wrapper! {
+    pub struct TocEntryRow(ObjectSubclass<imp::TocEntryRow>)
+        @extends ListBoxRow, gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Actionable;
+}
+
+impl TocEntryRow {
+    pub fn new(page_index: u16, title: &str, depth: usize) -> Self {
+        let row: TocEntryRow = glib::Object::builder().build();
+        row.imp().page_index.set(page_index);
+        row.imp().depth.set(depth);
+
+        let container = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(4)
+            .margin_start(12 + (depth * 16) as i32)
+            .margin_end(12)
+            .margin_top(4)
+            .margin_bottom(4)
+            .build();
+
+        let label = Label::new(Some(title));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        label.add_css_class("toc-entry");
+        container.append(&label);
+
+        row.set_child(Some(&container));
+        row
+    }
+
+    pub fn page_index(&self) -> u16 {
+        self.imp().page_index.get()
+    }
+
+    pub fn depth(&self) -> usize {
+        self.imp().depth.get()
+    }
 }
 
 glib::wrapper! {
@@ -107,11 +158,11 @@ impl TocPanel {
         let panel_weak = self.downgrade();
         imp.list_box.connect_row_activated(move |_, row| {
             if let Some(panel) = panel_weak.upgrade() {
-                let flat_entries = panel.imp().flat_entries.borrow();
-                let pos = row.index();
-                if let Some(flat_entry) = flat_entries.get(pos as usize) {
-                    panel
-                        .emit_by_name::<()>("chapter-selected", &[&(flat_entry.page_index as u32)]);
+                if let Some(entry_row) = row.downcast_ref::<TocEntryRow>() {
+                    panel.emit_by_name::<()>(
+                        "chapter-selected",
+                        &[&(entry_row.page_index() as u32)],
+                    );
                 }
             }
         });
@@ -131,8 +182,6 @@ impl TocPanel {
         while let Some(row) = imp.list_box.first_child() {
             imp.list_box.remove(&row);
         }
-
-        imp.flat_entries.borrow_mut().clear();
 
         if entries.is_empty() {
             let label = Label::new(Some("No chapters found"));
@@ -160,47 +209,37 @@ impl TocPanel {
     fn add_entry_row(&self, entry: &BookmarkEntry, depth: usize) {
         let imp = self.imp();
 
-        let row = gtk::Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(4)
-            .margin_start(12 + (depth * 16) as i32)
-            .margin_end(12)
-            .margin_top(4)
-            .margin_bottom(4)
-            .name(entry.page_index.to_string())
-            .build();
-
-        let label = Label::new(Some(&entry.title));
-        label.set_xalign(0.0);
-        label.set_hexpand(true);
-        label.add_css_class("toc-entry");
-        row.append(&label);
-
-        let list_row = gtk::ListBoxRow::builder().child(&row).build();
-
-        imp.list_box.append(&list_row);
-
-        imp.flat_entries.borrow_mut().push(FlatEntry {
-            page_index: entry.page_index,
-        });
+        let entry_row = TocEntryRow::new(entry.page_index, &entry.title, depth);
+        imp.list_box.append(&entry_row);
     }
 
     pub fn select_current_chapter(&self, page: u16) {
         let imp = self.imp();
-        let flat_entries = imp.flat_entries.borrow();
+        let children = imp.list_box.observe_children();
 
-        // Find the chapter with the highest page_index that is still <= current page
-        let mut best_match: Option<(usize, &FlatEntry)> = None;
+        let mut best_match: Option<glib::Object> = None;
+        let mut best_page_index: u16 = 0;
 
-        for (pos, entry) in flat_entries.iter().enumerate() {
-            if entry.page_index <= page {
-                best_match = Some((pos, entry));
+        for item in children.iter::<glib::Object>() {
+            match item {
+                Ok(child) => {
+                    if let Some(entry_row) = child.downcast_ref::<TocEntryRow>() {
+                        let entry_page = entry_row.page_index();
+                        if entry_page <= page && entry_page >= best_page_index {
+                            best_match = Some(child.clone());
+                            best_page_index = entry_page;
+                        }
+                    }
+                }
+                Err(_) => {
+                    break;
+                }
             }
         }
 
-        if let Some((pos, _)) = best_match {
-            if let Some(row) = imp.list_box.row_at_index(pos as i32) {
-                imp.list_box.select_row(Some(&row));
+        if let Some(row_obj) = best_match {
+            if let Some(row) = row_obj.downcast_ref::<ListBoxRow>() {
+                imp.list_box.select_row(Some(row));
                 row.grab_focus();
             }
         }
@@ -239,10 +278,8 @@ impl TocPanel {
 
     pub fn navigate_and_close(&self) {
         if let Some(row) = self.imp().list_box.selected_row() {
-            let pos = row.index();
-            let flat_entries = self.imp().flat_entries.borrow();
-            if let Some(flat_entry) = flat_entries.get(pos as usize) {
-                self.emit_by_name::<()>("chapter-selected", &[&(flat_entry.page_index as u32)]);
+            if let Some(entry_row) = row.downcast_ref::<TocEntryRow>() {
+                self.emit_by_name::<()>("chapter-selected", &[&(entry_row.page_index() as u32)]);
                 self.set_visible(false);
             }
         }
@@ -253,7 +290,6 @@ impl TocPanel {
         while let Some(row) = imp.list_box.first_child() {
             imp.list_box.remove(&row);
         }
-        imp.flat_entries.borrow_mut().clear();
     }
 }
 

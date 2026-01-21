@@ -1,3 +1,5 @@
+use gtk;
+use gtk::prelude::WidgetExt;
 use pdfium_render::prelude::*;
 
 pub const RENDER_WIDTH: i32 = 1000;
@@ -24,15 +26,34 @@ pub struct PageRenderConfig {
     pub stride: usize,
 }
 
-pub fn calculate_click_coordinates(x: f64, y: f64, page: &PdfPage) -> ClickData {
+/// Calculate the horizontal offset when a Picture is centered in its parent
+pub fn calculate_picture_offset(picture: &gtk::Picture) -> f64 {
+    let alloc = picture.allocation();
+    let natural_size = picture.preferred_size();
+    let natural_width = natural_size.1.width();
+
+    if natural_width > 0 && alloc.width() > natural_width {
+        return (alloc.width() - natural_width) as f64 / 2.0;
+    }
+    0.0
+}
+
+pub fn calculate_click_coordinates_with_offset(
+    x: f64,
+    y: f64,
+    page: &PdfPage,
+    picture_offset: f64,
+) -> ClickData {
     let page_width_pts = page.width().value as f64;
     let page_height_pts = page.height().value as f64;
     let scale = RENDER_WIDTH as f64 / page_width_pts;
 
+    let adjusted_x = x - picture_offset;
+
     ClickData {
-        pdf_x: x / scale,
+        pdf_x: adjusted_x / scale,
         pdf_y: page_height_pts - (y / scale),
-        screen_x: x,
+        screen_x: adjusted_x,
         screen_y: y,
     }
 }

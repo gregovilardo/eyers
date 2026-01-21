@@ -10,8 +10,9 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::services::pdf_text::{
-    self, calculate_click_coordinates, calculate_page_dimensions, create_render_config,
-    extract_word_at_index, find_char_index_at_click,
+    self, calculate_click_coordinates_with_offset, calculate_page_dimensions,
+    calculate_picture_offset, create_render_config, extract_word_at_index,
+    find_char_index_at_click,
 };
 use crate::widgets::DefinitionPopover;
 
@@ -215,13 +216,14 @@ impl PdfView {
             Err(_) => return,
         };
 
-        let click = calculate_click_coordinates(x, y, &page);
-
         let page_pictures = self.imp().page_pictures.borrow();
         let picture = match page_pictures.get(page_index) {
             Some(p) => p,
             None => return,
         };
+
+        let offset = calculate_picture_offset(picture);
+        let click = calculate_click_coordinates_with_offset(x, y, &page, offset);
 
         self.process_definition_click(&page, &click, picture);
     }
@@ -267,7 +269,14 @@ impl PdfView {
             Err(_) => return,
         };
 
-        let click = calculate_click_coordinates(x, y, &page);
+        let page_pictures = self.imp().page_pictures.borrow();
+        let picture = match page_pictures.get(page_index) {
+            Some(p) => p,
+            None => return,
+        };
+
+        let offset = calculate_picture_offset(picture);
+        let click = calculate_click_coordinates_with_offset(x, y, &page, offset);
 
         let text_page = match page.text() {
             Ok(tp) => tp,

@@ -8,6 +8,11 @@ use std::sync::OnceLock;
 
 use crate::services::bookmarks::BookmarkEntry;
 
+#[derive(Clone, Debug)]
+struct FlatEntry {
+    page_index: u16,
+}
+
 mod imp {
     use super::*;
 
@@ -15,7 +20,7 @@ mod imp {
     pub struct TocPanel {
         pub list_box: ListBox,
         pub close_button: Button,
-        pub entries: RefCell<Vec<BookmarkEntry>>,
+        pub flat_entries: RefCell<Vec<FlatEntry>>,
     }
 
     #[glib::object_subclass]
@@ -98,6 +103,18 @@ impl TocPanel {
         self.append(&scrolled_window);
 
         self.add_css_class("toc-panel");
+
+        let panel_weak = self.downgrade();
+        imp.list_box.connect_row_activated(move |_, row| {
+            if let Some(panel) = panel_weak.upgrade() {
+                let flat_entries = panel.imp().flat_entries.borrow();
+                let pos = row.index();
+                if let Some(flat_entry) = flat_entries.get(pos as usize) {
+                    panel
+                        .emit_by_name::<()>("chapter-selected", &[&(flat_entry.page_index as u32)]);
+                }
+            }
+        });
     }
 
     pub fn close_button(&self) -> &Button {
@@ -115,7 +132,7 @@ impl TocPanel {
             imp.list_box.remove(&row);
         }
 
-        imp.entries.borrow_mut().clear();
+        imp.flat_entries.borrow_mut().clear();
 
         if entries.is_empty() {
             let label = Label::new(Some("No chapters found"));
@@ -127,15 +144,21 @@ impl TocPanel {
             label.set_opacity(0.6);
             imp.list_box.append(&label);
         } else {
-            for entry in entries {
-                self.append_entry(entry, 0);
-            }
+            self.flatten_entries(entries, 0);
         }
-
-        imp.entries.borrow_mut().extend_from_slice(entries);
     }
 
-    fn append_entry(&self, entry: &BookmarkEntry, depth: usize) {
+    fn flatten_entries(&self, entries: &[BookmarkEntry], initial_depth: usize) {
+        for entry in entries {
+            println!("{:?}", entry);
+            self.add_entry_row(entry, initial_depth);
+            if !entry.children.is_empty() {
+                self.flatten_entries(&entry.children, initial_depth + 1);
+            }
+        }
+    }
+
+    fn add_entry_row(&self, entry: &BookmarkEntry, depth: usize) {
         let imp = self.imp();
 
         let row = gtk::Box::builder()
@@ -155,23 +178,8 @@ impl TocPanel {
 
         imp.list_box.append(&row);
 
-        if !entry.children.is_empty() {
-            for child in &entry.children {
-                self.append_entry(child, depth + 1);
-            }
-        }
-
-        let _page_index = entry.page_index as u32;
-
-        let panel_weak = self.downgrade();
-        imp.list_box.connect_row_activated(move |_, row| {
-            if let Some(panel) = panel_weak.upgrade() {
-                let entries = panel.imp().entries.borrow();
-                let pos = row.index();
-                if let Some(entry) = entries.get(pos as usize) {
-                    panel.emit_by_name::<()>("chapter-selected", &[&(entry.page_index as u32)]);
-                }
-            }
+        imp.flat_entries.borrow_mut().push(FlatEntry {
+            page_index: entry.page_index,
         });
     }
 
@@ -180,7 +188,7 @@ impl TocPanel {
         while let Some(row) = imp.list_box.first_child() {
             imp.list_box.remove(&row);
         }
-        imp.entries.borrow_mut().clear();
+        imp.flat_entries.borrow_mut().clear();
     }
 }
 

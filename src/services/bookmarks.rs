@@ -9,15 +9,12 @@ pub struct BookmarkEntry {
 }
 
 pub fn extract_bookmarks(document: &PdfDocument<'_>) -> Vec<BookmarkEntry> {
-    let mut entries = Vec::new();
-
-    for bookmark in document.bookmarks().iter() {
-        if let Some(entry) = process_bookmark(&bookmark, 0) {
-            entries.push(entry);
-        }
-    }
-
-    entries
+    document
+        .bookmarks()
+        .iter()
+        .filter(|bookmark| bookmark.parent().is_none())
+        .filter_map(|bookmark| process_bookmark(&bookmark, 0))
+        .collect()
 }
 
 fn process_bookmark(bookmark: &PdfBookmark, depth: usize) -> Option<BookmarkEntry> {

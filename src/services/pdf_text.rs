@@ -53,7 +53,7 @@ pub fn calculate_click_coordinates_with_offset(
     ClickData {
         pdf_x: adjusted_x / scale,
         pdf_y: page_height_pts - (y / scale),
-        screen_x: adjusted_x,
+        screen_x: x,
         screen_y: y,
     }
 }

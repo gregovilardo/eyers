@@ -134,6 +134,29 @@ impl EyersWindow {
         self.setup_translation_panel();
         self.setup_toc_panel();
         self.setup_keyboard_controller();
+        self.setup_scroll_tracking();
+    }
+
+    fn setup_scroll_tracking(&self) {
+        let pdf_view = self.imp().pdf_view.clone();
+
+        if let Some(scrolled_window) = self.scrolled_window() {
+            let adjustment = scrolled_window.vadjustment();
+
+            adjustment.connect_value_changed(move |_| {
+                pdf_view.schedule_page_update();
+            });
+        }
+    }
+
+    fn scrolled_window(&self) -> Option<gtk::ScrolledWindow> {
+        self.imp()
+            .paned
+            .borrow()
+            .as_ref()?
+            .start_child()? //Get the first child of the paned (the "start" pane)
+            .downcast()
+            .ok()
     }
 
     fn setup_translation_panel(&self) {

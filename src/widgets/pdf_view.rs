@@ -39,6 +39,8 @@ mod imp {
         pub bookmarks: RefCell<Option<Vec<bookmarks::BookmarkEntry>>>,
         pub(super) page_pictures: RefCell<Vec<Picture>>,
         pub selection_start: RefCell<Option<SelectionPoint>>,
+        pub current_page: Cell<u16>,
+        pub pending_update: Cell<bool>,
         #[property(get, set, default = false)]
         pub definitions_enabled: Cell<bool>,
         #[property(get, set, default = false)]
@@ -92,6 +94,7 @@ impl PdfView {
     fn setup_widgets(&self) {
         self.set_orientation(Orientation::Vertical);
         self.set_spacing(10);
+        self.setup_scroll_tracking();
     }
 
     pub fn set_pdfium(&self, pdfium: &'static Pdfium) {
@@ -372,6 +375,84 @@ impl PdfView {
 
     pub fn has_document(&self) -> bool {
         self.imp().document.borrow().is_some()
+    }
+
+    pub fn current_page(&self) -> u16 {
+        self.imp().current_page.get()
+    }
+
+    fn setup_scroll_tracking(&self) {
+        let view_weak = self.downgrade();
+
+        let scroll_controller =
+            gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+
+        scroll_controller.connect_scroll(move |_, _, _| {
+            if let Some(view) = view_weak.upgrade() {
+                view.schedule_page_update();
+            }
+            glib::Propagation::Proceed
+        });
+
+        self.add_controller(scroll_controller);
+    }
+
+    pub(crate) fn schedule_page_update(&self) {
+        let imp = self.imp();
+
+        if imp.pending_update.get() {
+            return;
+        }
+
+        imp.pending_update.set(true);
+
+        let view_weak = self.downgrade();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
+            if let Some(view) = view_weak.upgrade() {
+                view.imp().pending_update.set(false);
+                view.update_current_page();
+            }
+        });
+    }
+
+    fn update_current_page(&self) {
+        if let Some(page_index) = self.calculate_current_page_from_scroll() {
+            self.imp().current_page.set(page_index);
+        }
+    }
+
+    fn find_scrolled_window(&self) -> Option<gtk::ScrolledWindow> {
+        self.parent()?.parent()?.downcast().ok()
+    }
+
+    fn calculate_current_page_from_scroll(&self) -> Option<u16> {
+        let scrolled = self.find_scrolled_window()?;
+
+        let adjustment = scrolled.vadjustment();
+        let scroll_y = adjustment.value();
+        let viewport_height = adjustment.page_size();
+        let visible_start = scroll_y;
+        let visible_end = scroll_y + viewport_height;
+
+        let page_pictures = self.imp().page_pictures.borrow();
+        let spacing = 10.0;
+
+        for (index, picture) in page_pictures.iter().enumerate() {
+            let nat_size = picture.preferred_size().1;
+            let picture_height = nat_size.height() as f64;
+
+            let page_top = index as f64 * (picture_height + spacing);
+            let page_bottom = page_top + picture_height;
+
+            if page_bottom > visible_start && page_top < visible_end {
+                return Some(index as u16);
+            }
+        }
+
+        if !page_pictures.is_empty() {
+            return Some((page_pictures.len() - 1) as u16);
+        }
+        None
     }
 
     pub fn bookmarks(&self) -> Vec<bookmarks::BookmarkEntry> {

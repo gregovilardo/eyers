@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use crate::services::bookmarks::BookmarkEntry;
 
 #[derive(Clone, Debug)]
-pub(self) struct FlatEntry {
+struct FlatEntry {
     page_index: u16,
 }
 
@@ -103,6 +103,18 @@ impl TocPanel {
         self.append(&scrolled_window);
 
         self.add_css_class("toc-panel");
+
+        let panel_weak = self.downgrade();
+        imp.list_box.connect_row_activated(move |_, row| {
+            if let Some(panel) = panel_weak.upgrade() {
+                let flat_entries = panel.imp().flat_entries.borrow();
+                let pos = row.index();
+                if let Some(flat_entry) = flat_entries.get(pos as usize) {
+                    panel
+                        .emit_by_name::<()>("chapter-selected", &[&(flat_entry.page_index as u32)]);
+                }
+            }
+        });
     }
 
     pub fn close_button(&self) -> &Button {

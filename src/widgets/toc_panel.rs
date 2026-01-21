@@ -2,14 +2,14 @@ use glib::subclass::Signal;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{Box, Button, Label, ListBox, Orientation, ScrolledWindow};
+use gtk::{Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow};
 use std::cell::RefCell;
 use std::sync::OnceLock;
 
 use crate::services::bookmarks::BookmarkEntry;
 
 #[derive(Clone, Debug)]
-struct FlatEntry {
+pub(self) struct FlatEntry {
     page_index: u16,
 }
 
@@ -103,18 +103,6 @@ impl TocPanel {
         self.append(&scrolled_window);
 
         self.add_css_class("toc-panel");
-
-        let panel_weak = self.downgrade();
-        imp.list_box.connect_row_activated(move |_, row| {
-            if let Some(panel) = panel_weak.upgrade() {
-                let flat_entries = panel.imp().flat_entries.borrow();
-                let pos = row.index();
-                if let Some(flat_entry) = flat_entries.get(pos as usize) {
-                    panel
-                        .emit_by_name::<()>("chapter-selected", &[&(flat_entry.page_index as u32)]);
-                }
-            }
-        });
     }
 
     pub fn close_button(&self) -> &Button {
@@ -150,7 +138,6 @@ impl TocPanel {
 
     fn flatten_entries(&self, entries: &[BookmarkEntry], initial_depth: usize) {
         for entry in entries {
-            println!("{:?}", entry);
             self.add_entry_row(entry, initial_depth);
             if !entry.children.is_empty() {
                 self.flatten_entries(&entry.children, initial_depth + 1);
@@ -176,11 +163,55 @@ impl TocPanel {
         label.add_css_class("toc-entry");
         row.append(&label);
 
-        imp.list_box.append(&row);
+        let list_row = gtk::ListBoxRow::builder().child(&row).build();
+
+        imp.list_box.append(&list_row);
 
         imp.flat_entries.borrow_mut().push(FlatEntry {
             page_index: entry.page_index,
         });
+    }
+
+    pub fn select_first(&self) {
+        if let Some(first_child) = self.imp().list_box.first_child() {
+            if let Some(list_row) = first_child.downcast_ref::<ListBoxRow>() {
+                self.imp().list_box.select_row(Some(list_row));
+                list_row.grab_focus();
+            }
+        }
+    }
+
+    pub fn select_next(&self) {
+        if let Some(current) = self.imp().list_box.selected_row() {
+            if let Some(next_widget) = current.next_sibling() {
+                if let Some(next) = next_widget.downcast_ref::<ListBoxRow>() {
+                    self.imp().list_box.select_row(Some(next));
+                    next.grab_focus();
+                }
+            }
+        }
+    }
+
+    pub fn select_prev(&self) {
+        if let Some(current) = self.imp().list_box.selected_row() {
+            if let Some(prev_widget) = current.prev_sibling() {
+                if let Some(prev) = prev_widget.downcast_ref::<ListBoxRow>() {
+                    self.imp().list_box.select_row(Some(prev));
+                    prev.grab_focus();
+                }
+            }
+        }
+    }
+
+    pub fn navigate_and_close(&self) {
+        if let Some(row) = self.imp().list_box.selected_row() {
+            let pos = row.index();
+            let flat_entries = self.imp().flat_entries.borrow();
+            if let Some(flat_entry) = flat_entries.get(pos as usize) {
+                self.emit_by_name::<()>("chapter-selected", &[&(flat_entry.page_index as u32)]);
+                self.set_visible(false);
+            }
+        }
     }
 
     pub fn clear(&self) {

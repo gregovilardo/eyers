@@ -220,14 +220,38 @@ impl EyersWindow {
         let window_weak = self.downgrade();
 
         controller.connect_key_pressed(move |_, key, _, _| {
-            if key == gtk::gdk::Key::Tab {
-                if let Some(window) = window_weak.upgrade() {
+            if let Some(window) = window_weak.upgrade() {
+                let imp = window.imp();
+                let toc_visible = imp.toc_panel.is_visible();
+
+                if key == gtk::gdk::Key::Tab {
                     window.toggle_toc_panel();
+                    return glib::Propagation::Stop;
                 }
-                glib::Propagation::Stop
-            } else {
-                glib::Propagation::Proceed
+
+                if toc_visible {
+                    match key {
+                        gtk::gdk::Key::j | gtk::gdk::Key::Down => {
+                            imp.toc_panel.select_next();
+                            return glib::Propagation::Stop;
+                        }
+                        gtk::gdk::Key::k | gtk::gdk::Key::Up => {
+                            imp.toc_panel.select_prev();
+                            return glib::Propagation::Stop;
+                        }
+                        gtk::gdk::Key::Return => {
+                            imp.toc_panel.navigate_and_close();
+                            return glib::Propagation::Stop;
+                        }
+                        gtk::gdk::Key::Escape => {
+                            imp.toc_panel.set_visible(false);
+                            return glib::Propagation::Stop;
+                        }
+                        _ => {}
+                    }
+                }
             }
+            glib::Propagation::Proceed
         });
 
         self.add_controller(controller);
@@ -237,6 +261,11 @@ impl EyersWindow {
         let imp = self.imp();
         let is_visible = imp.toc_panel.is_visible();
         imp.toc_panel.set_visible(!is_visible);
+
+        if !is_visible {
+            imp.toc_panel.grab_focus();
+            imp.toc_panel.select_first();
+        }
     }
 
     fn setup_open_button(&self) {

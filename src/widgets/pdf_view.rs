@@ -9,6 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use crate::services::bookmarks;
 use crate::services::pdf_text::{
     self, calculate_click_coordinates_with_offset, calculate_page_dimensions,
     calculate_picture_offset, create_render_config, extract_word_at_index,
@@ -35,16 +36,11 @@ mod imp {
         pub document: RefCell<Option<PdfDocument<'static>>>,
         pub pdfium: RefCell<Option<&'static Pdfium>>,
         pub current_popover: RefCell<Option<DefinitionPopover>>,
-
-        // Pictures for each page (for popover positioning)
+        pub bookmarks: RefCell<Option<Vec<bookmarks::BookmarkEntry>>>,
         pub(super) page_pictures: RefCell<Vec<Picture>>,
-
-        // Selection state for translate mode
         pub selection_start: RefCell<Option<SelectionPoint>>,
-
         #[property(get, set, default = false)]
         pub definitions_enabled: Cell<bool>,
-
         #[property(get, set, default = false)]
         pub translate_enabled: Cell<bool>,
     }
@@ -69,6 +65,9 @@ mod imp {
                 vec![
                     Signal::builder("translate-requested")
                         .param_types([String::static_type()])
+                        .build(),
+                    Signal::builder("scroll-to-page")
+                        .param_types([u32::static_type()])
                         .build(),
                 ]
             })
@@ -113,6 +112,9 @@ impl PdfView {
         let document = pdfium
             .load_pdf_from_file(&path, None)
             .map_err(|e| format!("Failed to open PDF: {}", e))?;
+
+        let entries = bookmarks::extract_bookmarks(&document);
+        self.imp().bookmarks.replace(Some(entries));
 
         self.imp().document.replace(Some(document));
         self.render_pages();
@@ -350,6 +352,30 @@ impl PdfView {
             popover.popdown();
             popover.unparent();
         }
+    }
+
+    pub fn scroll_to_page(&self, page_index: u16) {
+        self.emit_by_name::<()>("scroll-to-page", &[&(page_index as u32)]);
+    }
+
+    pub fn page_picture(&self, page_index: u16) -> Option<Picture> {
+        self.imp()
+            .page_pictures
+            .borrow()
+            .get(page_index as usize)
+            .cloned()
+    }
+
+    pub fn page_pictures(&self) -> std::cell::Ref<'_, Vec<Picture>> {
+        self.imp().page_pictures.borrow()
+    }
+
+    pub fn has_document(&self) -> bool {
+        self.imp().document.borrow().is_some()
+    }
+
+    pub fn bookmarks(&self) -> Vec<bookmarks::BookmarkEntry> {
+        self.imp().bookmarks.borrow().clone().unwrap_or_default()
     }
 }
 

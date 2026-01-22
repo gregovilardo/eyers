@@ -8,10 +8,10 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use crate::modes::{
-    handle_normal_mode_key, handle_visual_mode_key, AppMode, KeyAction, WordCursor,
+    AppMode, KeyAction, WordCursor, handle_normal_mode_key, handle_visual_mode_key,
 };
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
+use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::{EyersHeaderBar, HighlightRect, PdfView, TocPanel, TranslationPanel};
 
 mod imp {
@@ -103,8 +103,8 @@ impl EyersWindow {
     }
 
     fn init_pdfium(&self) {
-        let bindings =
-            Pdfium::bind_to_library(Path::new("./libpdfium.so")).expect("Failed to bind to PDFium");
+        let bindings = Pdfium::bind_to_library(Path::new("/usr/bin/libpdfium.so"))
+            .expect("Failed to bind to PDFium");
         let pdfium: &'static Pdfium =
             std::boxed::Box::leak(std::boxed::Box::new(Pdfium::new(bindings)));
 

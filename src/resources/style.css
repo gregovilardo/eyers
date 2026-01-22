@@ -32,24 +32,24 @@
     padding: 12px;
 }
 
-/* Copy Feedback Popup */
-.copy-feedback {
-    background-color: alpha(@accent_bg_color, 0.95);
-    border-radius: 12px;
-    padding: 16px 24px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+/* Toast Notification (in-app) */
+.toast-notification {
+    background-color: #303030;
+    color: #ffffff;
+    border-radius: 8px;
+    padding: 8px 16px;
+    margin-top: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    border: 1px solid #505050;
 }
 
-.copy-feedback-title {
-    font-weight: bold;
-    font-size: 1.1em;
-    color: @accent_fg_color;
-    margin-bottom: 8px;
+.toast-icon {
+    color: #2ec27e;
+    min-width: 16px;
+    min-height: 16px;
 }
 
-.copy-feedback-preview {
-    font-style: italic;
-    font-size: 0.9em;
-    color: alpha(@accent_fg_color, 0.8);
-    max-width: 300px;
+.toast-label {
+    font-size: 0.95em;
+    color: #ffffff;
 }

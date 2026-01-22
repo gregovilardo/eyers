@@ -10,6 +10,7 @@ use std::path::Path;
 use crate::modes::{
     handle_normal_mode_key, handle_visual_mode_key, AppMode, KeyAction, WordCursor,
 };
+use crate::services::pdf_text::calculate_picture_offset;
 use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
 use crate::widgets::{EyersHeaderBar, HighlightRect, PdfView, TocPanel, TranslationPanel};
 
@@ -28,10 +29,23 @@ mod imp {
         pub text_cache: RefCell<Option<TextMapCache>>,
         /// Pending find direction: Some(true) = forward, Some(false) = backward
         pub pending_find: RefCell<Option<bool>>,
+        /// Toast revealer for copy feedback
+        pub toast_revealer: gtk::Revealer,
+        /// Toast label for displaying message
+        pub toast_label: gtk::Label,
     }
 
     impl Default for EyersWindow {
         fn default() -> Self {
+            let toast_revealer = gtk::Revealer::builder()
+                .transition_type(gtk::RevealerTransitionType::SlideDown)
+                .transition_duration(150)
+                .halign(gtk::Align::Center)
+                .valign(gtk::Align::Start)
+                .build();
+
+            let toast_label = gtk::Label::new(None);
+
             Self {
                 header_bar: EyersHeaderBar::new(),
                 pdf_view: PdfView::new(),
@@ -43,6 +57,8 @@ mod imp {
                 app_mode: RefCell::new(AppMode::default()),
                 text_cache: RefCell::new(None),
                 pending_find: RefCell::new(None),
+                toast_revealer,
+                toast_label,
             }
         }
     }
@@ -143,12 +159,50 @@ impl EyersWindow {
         imp.translation_panel.set_visible(false);
         main_box.append(&imp.translation_panel);
 
-        self.set_child(Some(&main_box));
+        // Set up toast notification
+        self.setup_toast();
+
+        // Create overlay for toast notifications
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&main_box));
+        overlay.add_overlay(&imp.toast_revealer);
+
+        self.set_child(Some(&overlay));
 
         self.setup_translation_panel();
         self.setup_toc_panel();
         self.setup_keyboard_controller();
         self.setup_scroll_tracking();
+    }
+
+    fn setup_toast(&self) {
+        let imp = self.imp();
+
+        // Create toast content box
+        let toast_box = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(8)
+            .margin_start(16)
+            .margin_end(16)
+            .margin_top(12)
+            .margin_bottom(12)
+            .build();
+
+        toast_box.add_css_class("toast-notification");
+
+        // Add checkmark icon
+        let icon = gtk::Image::from_icon_name("object-select-symbolic");
+        icon.add_css_class("toast-icon");
+        toast_box.append(&icon);
+
+        // Add label
+        imp.toast_label.add_css_class("toast-label");
+        imp.toast_label
+            .set_ellipsize(gtk::pango::EllipsizeMode::End);
+        imp.toast_label.set_max_width_chars(50);
+        toast_box.append(&imp.toast_label);
+
+        imp.toast_revealer.set_child(Some(&toast_box));
     }
 
     fn setup_scroll_tracking(&self) {
@@ -461,9 +515,10 @@ impl EyersWindow {
         let y_percent = if down { 50.0 } else { -50.0 };
         self.scroll_by_percent(0.0, y_percent);
 
-        // In Visual mode, update cursor to first visible word
+        // In Visual mode, update cursor to word at ~20% from viewport top
+        // This feels more natural than the very first word at the top edge
         if imp.app_mode.borrow().is_visual() {
-            if let Some(cursor) = self.compute_first_visible_word() {
+            if let Some(cursor) = self.compute_word_at_viewport_offset(0.20) {
                 {
                     let mut mode = imp.app_mode.borrow_mut();
                     mode.set_cursor(cursor);
@@ -473,6 +528,81 @@ impl EyersWindow {
                 self.print_cursor_word(cursor);
             }
         }
+    }
+
+    /// Compute a word at a given offset from the top of the viewport
+    /// `offset_percent` is 0.0 for top, 1.0 for bottom (e.g., 0.20 = 20% from top)
+    fn compute_word_at_viewport_offset(&self, offset_percent: f64) -> Option<WordCursor> {
+        let imp = self.imp();
+
+        let scrolled = imp.scrolled_window.borrow();
+        let scrolled = scrolled.as_ref()?;
+        let vadj = scrolled.vadjustment();
+        let scroll_y = vadj.value();
+        let viewport_height = vadj.page_size();
+
+        // Target position in screen coordinates (absolute, not relative to page)
+        let target_y = scroll_y + viewport_height * offset_percent;
+
+        let doc_borrow = imp.pdf_view.document();
+        let doc = doc_borrow.as_ref()?;
+
+        let mut cache = imp.text_cache.borrow_mut();
+        let cache = cache.as_mut()?;
+
+        let page_pictures = imp.pdf_view.page_pictures();
+        let spacing = 10.0;
+
+        for (page_index, picture) in page_pictures.iter().enumerate() {
+            let nat_size = picture.preferred_size().1;
+            let picture_height = nat_size.height() as f64;
+
+            let page_top = page_index as f64 * (picture_height + spacing);
+            let page_bottom = page_top + picture_height;
+
+            // Check if the target Y falls within this page
+            if target_y >= page_top && target_y < page_bottom {
+                if let Some(text_map) = cache.get_or_build(page_index, doc) {
+                    if text_map.word_count() > 0 {
+                        let page_width_pts = text_map.page_width;
+                        let page_height_pts = text_map.page_height;
+                        let scale = crate::services::pdf_text::RENDER_WIDTH as f64 / page_width_pts;
+
+                        // Convert target_y to position within page (screen coords relative to page)
+                        let target_y_in_page = target_y - page_top;
+
+                        // Convert to PDF coords (y is flipped)
+                        let target_pdf_y = page_height_pts - (target_y_in_page / scale);
+
+                        // Find word closest to this y-coordinate
+                        // We'll search for a word whose center_y is closest to target_pdf_y
+                        let mut best_word_idx: Option<usize> = None;
+                        let mut best_distance = f64::MAX;
+
+                        for idx in 0..text_map.word_count() {
+                            if let Some(word) = text_map.get_word(idx) {
+                                let distance = (word.center_y - target_pdf_y).abs();
+                                if distance < best_distance {
+                                    best_distance = distance;
+                                    best_word_idx = Some(idx);
+                                }
+                            }
+                        }
+
+                        if let Some(word_idx) = best_word_idx {
+                            return Some(WordCursor::new(page_index, word_idx));
+                        }
+
+                        // Fallback to first word
+                        return Some(WordCursor::new(page_index, 0));
+                    }
+                }
+            }
+        }
+
+        // If target falls outside all pages (e.g., in spacing), find nearest page
+        // and return first visible word
+        self.compute_first_visible_word()
     }
 
     /// Compute the first visible word in the current viewport
@@ -585,6 +715,17 @@ impl EyersWindow {
             None => return,
         };
 
+        // Get page pictures for calculating offsets
+        let page_pictures = imp.pdf_view.page_pictures();
+
+        // Helper closure to get x_offset for a page
+        let get_x_offset = |page_index: usize| -> f64 {
+            page_pictures
+                .get(page_index)
+                .map(|pic| calculate_picture_offset(pic))
+                .unwrap_or(0.0)
+        };
+
         // Build a map of page_index -> (cursor_rect, selection_rects)
         let mut page_highlights: std::collections::HashMap<
             usize,
@@ -595,10 +736,12 @@ impl EyersWindow {
         if let Some(cursor) = cursor {
             if let Some(text_map) = cache.get(cursor.page_index) {
                 if let Some(word) = text_map.get_word(cursor.word_index) {
+                    let x_offset = get_x_offset(cursor.page_index);
                     let rect = HighlightRect::from_pdf_bounds(
                         &word.bounds,
                         text_map.page_width,
                         text_map.page_height,
+                        x_offset,
                     );
                     page_highlights
                         .entry(cursor.page_index)
@@ -620,12 +763,14 @@ impl EyersWindow {
             if first.page_index == last.page_index {
                 // Same page selection
                 if let Some(text_map) = cache.get(first.page_index) {
+                    let x_offset = get_x_offset(first.page_index);
                     for idx in first.word_index..=last.word_index {
                         if let Some(word) = text_map.get_word(idx) {
                             let rect = HighlightRect::from_pdf_bounds(
                                 &word.bounds,
                                 text_map.page_width,
                                 text_map.page_height,
+                                x_offset,
                             );
                             page_highlights
                                 .entry(first.page_index)
@@ -639,12 +784,14 @@ impl EyersWindow {
                 // Cross-page selection
                 // First page: from first.word_index to end
                 if let Some(text_map) = cache.get(first.page_index) {
+                    let x_offset = get_x_offset(first.page_index);
                     for idx in first.word_index..text_map.word_count() {
                         if let Some(word) = text_map.get_word(idx) {
                             let rect = HighlightRect::from_pdf_bounds(
                                 &word.bounds,
                                 text_map.page_width,
                                 text_map.page_height,
+                                x_offset,
                             );
                             page_highlights
                                 .entry(first.page_index)
@@ -658,12 +805,14 @@ impl EyersWindow {
                 // Middle pages
                 for page_idx in (first.page_index + 1)..last.page_index {
                     if let Some(text_map) = cache.get(page_idx) {
+                        let x_offset = get_x_offset(page_idx);
                         for idx in 0..text_map.word_count() {
                             if let Some(word) = text_map.get_word(idx) {
                                 let rect = HighlightRect::from_pdf_bounds(
                                     &word.bounds,
                                     text_map.page_width,
                                     text_map.page_height,
+                                    x_offset,
                                 );
                                 page_highlights
                                     .entry(page_idx)
@@ -677,12 +826,14 @@ impl EyersWindow {
 
                 // Last page: from 0 to last.word_index
                 if let Some(text_map) = cache.get(last.page_index) {
+                    let x_offset = get_x_offset(last.page_index);
                     for idx in 0..=last.word_index {
                         if let Some(word) = text_map.get_word(idx) {
                             let rect = HighlightRect::from_pdf_bounds(
                                 &word.bounds,
                                 text_map.page_width,
                                 text_map.page_height,
+                                x_offset,
                             );
                             page_highlights
                                 .entry(last.page_index)
@@ -794,17 +945,16 @@ impl EyersWindow {
         };
 
         // Show definition using existing mechanism
-        // For now, we'll use the translation panel to show the definition
-        // TODO: Use the definition popover positioned at the word
         let word_text = word.text.clone();
         println!("Definition for: {}", word_text);
 
         // Use the definition popover
         let page_pictures = imp.pdf_view.page_pictures();
         if let Some(pic) = page_pictures.get(cursor.page_index) {
-            // Calculate screen position for popover
+            // Calculate screen position for popover (including x_offset for centering)
             let scale = crate::services::pdf_text::RENDER_WIDTH as f64 / text_map.page_width;
-            let screen_x = word.center_x * scale;
+            let x_offset = calculate_picture_offset(pic);
+            let screen_x = word.center_x * scale + x_offset;
             let screen_y = (text_map.page_height - word.center_y) * scale;
 
             let popover = crate::widgets::DefinitionPopover::new();
@@ -1020,55 +1170,26 @@ impl EyersWindow {
         text_parts.join(" ")
     }
 
-    /// Show a brief feedback popup when text is copied
+    /// Show a brief toast notification when text is copied
     fn show_copy_feedback(&self, text: &str) {
-        // Create a small popup window for feedback
-        let popup = gtk::Window::builder()
-            .transient_for(self)
-            .modal(false)
-            .decorated(false)
-            .resizable(false)
-            .build();
+        let imp = self.imp();
 
-        // Add CSS class for styling
-        popup.add_css_class("copy-feedback");
-
-        let content = gtk::Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .margin_start(12)
-            .margin_end(12)
-            .margin_top(8)
-            .margin_bottom(8)
-            .build();
-
-        let label = gtk::Label::new(Some("Copied!"));
-        label.add_css_class("copy-feedback-title");
-
-        // Show a preview of copied text (truncated if too long)
-        let preview = if text.len() > 50 {
-            format!("{}...", &text[..47])
+        // Format the message with a preview of copied text
+        let preview = if text.len() > 40 {
+            format!("Copied: \"{}...\"", &text[..37])
         } else {
-            text.to_string()
+            format!("Copied: \"{}\"", text)
         };
-        let preview_label = gtk::Label::new(Some(&preview));
-        preview_label.add_css_class("copy-feedback-preview");
-        preview_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        preview_label.set_max_width_chars(40);
 
-        content.append(&label);
-        content.append(&preview_label);
-        popup.set_child(Some(&content));
+        imp.toast_label.set_text(&preview);
 
-        // Position near the top-center of the main window
-        popup.present();
+        // Show the toast
+        imp.toast_revealer.set_reveal_child(true);
 
-        // Auto-close after 1.5 seconds
-        let popup_weak = popup.downgrade();
+        // Auto-hide after 1.5 seconds
+        let revealer = imp.toast_revealer.clone();
         glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
-            if let Some(p) = popup_weak.upgrade() {
-                p.close();
-            }
+            revealer.set_reveal_child(false);
         });
     }
 

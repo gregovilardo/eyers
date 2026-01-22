@@ -20,13 +20,21 @@ impl HighlightRect {
     ///
     /// PDF coordinates: origin at bottom-left, y increases upward
     /// Screen coordinates: origin at top-left, y increases downward
-    pub fn from_pdf_bounds(bounds: &PdfRect, page_width: f64, page_height: f64) -> Self {
+    ///
+    /// `x_offset` accounts for horizontal centering when the Picture is narrower
+    /// than its container (e.g., in fullscreen mode)
+    pub fn from_pdf_bounds(
+        bounds: &PdfRect,
+        page_width: f64,
+        page_height: f64,
+        x_offset: f64,
+    ) -> Self {
         let scale = RENDER_WIDTH as f64 / page_width;
 
         // PDF coords -> screen coords
-        // screen_x = pdf_x * scale
+        // screen_x = pdf_x * scale + x_offset (account for centering)
         // screen_y = (page_height - pdf_top) * scale (flip y-axis)
-        let x = bounds.left().value as f64 * scale;
+        let x = bounds.left().value as f64 * scale + x_offset;
         let y = (page_height - bounds.top().value as f64) * scale;
         let width = (bounds.right().value - bounds.left().value) as f64 * scale;
         let height = (bounds.top().value - bounds.bottom().value) as f64 * scale;

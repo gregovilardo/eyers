@@ -1,3 +1,3 @@
 - Make it work in spanish also.
-- Be able to translate words
-- Be able to translate sentences
+- go up and down with keys on definition popover
+- make translation nicer

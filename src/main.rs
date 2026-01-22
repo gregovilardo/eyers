@@ -4,7 +4,7 @@ mod text_map;
 mod widgets;
 
 use gtk::prelude::*;
-use gtk::{gdk, glib, Application, CssProvider};
+use gtk::{gdk, gio, glib, Application, CssProvider};
 use widgets::EyersWindow;
 
 const APP_ID: &str = "org.gtk_rs.eyers";
@@ -20,16 +20,32 @@ fn load_css() {
     );
 }
 
-fn build_ui(app: &Application) {
-    let window = EyersWindow::new(app);
-    window.present();
-}
-
 fn main() -> glib::ExitCode {
-    let app = Application::builder().application_id(APP_ID).build();
+    let app = Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_OPEN)
+        .build();
 
     app.connect_startup(|_| load_css());
-    app.connect_activate(build_ui);
+
+    // Handle activation without file (just open window)
+    app.connect_activate(|app| {
+        let window = EyersWindow::new(app);
+        window.present();
+    });
+
+    // Handle opening files from command line
+    app.connect_open(|app, files, _| {
+        let window = EyersWindow::new(app);
+
+        if let Some(file) = files.first() {
+            if let Some(path) = file.path() {
+                window.open_file(&path);
+            }
+        }
+
+        window.present();
+    });
 
     app.run()
 }

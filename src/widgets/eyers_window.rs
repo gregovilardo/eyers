@@ -270,6 +270,12 @@ impl EyersWindow {
                     return glib::Propagation::Stop;
                 }
 
+                // Toggle header bar visibility with 'b'
+                if key == gtk::gdk::Key::b {
+                    window.toggle_header_bar();
+                    return glib::Propagation::Stop;
+                }
+
                 if toc_visible {
                     match key {
                         gtk::gdk::Key::j | gtk::gdk::Key::Down => {
@@ -1205,6 +1211,13 @@ impl EyersWindow {
         }
     }
 
+    fn toggle_header_bar(&self) {
+        let imp = self.imp();
+        let header = imp.header_bar.widget();
+        let is_visible = header.is_visible();
+        header.set_visible(!is_visible);
+    }
+
     fn setup_open_button(&self) {
         let window_weak = self.downgrade();
 
@@ -1240,7 +1253,12 @@ impl EyersWindow {
             None => return,
         };
 
-        if let Err(e) = self.imp().pdf_view.load_pdf(path) {
+        self.open_file(&path);
+    }
+
+    /// Open a PDF file from a path (public API for CLI usage)
+    pub fn open_file(&self, path: &Path) {
+        if let Err(e) = self.imp().pdf_view.load_pdf(path.to_path_buf()) {
             eprintln!("{}", e);
             return;
         }

@@ -355,7 +355,10 @@ impl PdfView {
     }
 
     pub fn scroll_to_page(&self, page_index: u16) {
+        println!("scrolling to page {}", page_index);
         if let Some(scrolled) = self.find_scrolled_window() {
+            //TODO: find if you can stop the scroll of mouse so it can set value of adjustment
+            //right
             let adjustment = scrolled.vadjustment();
             let page_pictures = self.page_pictures();
 

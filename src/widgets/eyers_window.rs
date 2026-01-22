@@ -16,6 +16,7 @@ mod imp {
         pub header_bar: EyersHeaderBar,
         pub pdf_view: PdfView,
         pub toc_panel: TocPanel,
+        pub scrolled_window: RefCell<Option<ScrolledWindow>>,
         pub translation_panel: TranslationPanel,
         pub pdfium: RefCell<Option<&'static Pdfium>>,
         pub paned: RefCell<Option<Paned>>,
@@ -27,6 +28,7 @@ mod imp {
                 header_bar: EyersHeaderBar::new(),
                 pdf_view: PdfView::new(),
                 toc_panel: TocPanel::new(),
+                scrolled_window: RefCell::new(None),
                 translation_panel: TranslationPanel::new(),
                 pdfium: RefCell::new(None),
                 paned: RefCell::new(None),
@@ -99,11 +101,6 @@ impl EyersWindow {
             .sync_create()
             .build();
 
-        let paned = Paned::builder()
-            .orientation(Orientation::Horizontal)
-            .build();
-        paned.set_wide_handle(true);
-
         let scrolled_window = ScrolledWindow::builder()
             .hscrollbar_policy(PolicyType::Automatic)
             .vscrollbar_policy(PolicyType::Automatic)
@@ -112,6 +109,12 @@ impl EyersWindow {
             .child(&imp.pdf_view)
             .build();
 
+        imp.scrolled_window.replace(Some(scrolled_window.clone()));
+
+        let paned = Paned::builder()
+            .orientation(Orientation::Horizontal)
+            .build();
+        paned.set_wide_handle(true);
         paned.set_start_child(Some(&scrolled_window));
         paned.set_end_child(Some(&imp.toc_panel));
         paned.set_resize_start_child(true);
@@ -139,24 +142,13 @@ impl EyersWindow {
 
     fn setup_scroll_tracking(&self) {
         let pdf_view = self.imp().pdf_view.clone();
-
-        if let Some(scrolled_window) = self.scrolled_window() {
+        if let Some(scrolled_window) = self.imp().scrolled_window.borrow().as_ref() {
             let adjustment = scrolled_window.vadjustment();
 
             adjustment.connect_value_changed(move |_| {
                 pdf_view.schedule_page_update();
             });
         }
-    }
-
-    fn scrolled_window(&self) -> Option<gtk::ScrolledWindow> {
-        self.imp()
-            .paned
-            .borrow()
-            .as_ref()?
-            .start_child()? //Get the first child of the paned (the "start" pane)
-            .downcast()
-            .ok()
     }
 
     fn setup_translation_panel(&self) {

@@ -28,12 +28,12 @@ pub struct PageRenderConfig {
 
 /// Calculate the horizontal offset when a Picture is centered in its parent
 pub fn calculate_picture_offset(picture: &gtk::Picture) -> f64 {
-    let alloc = picture.allocation();
+    let alloc_width = picture.width();
     let natural_size = picture.preferred_size();
     let natural_width = natural_size.1.width();
 
-    if natural_width > 0 && alloc.width() > natural_width {
-        return (alloc.width() - natural_width) as f64 / 2.0;
+    if natural_width > 0 && alloc_width > natural_width {
+        return (alloc_width - natural_width) as f64 / 2.0;
     }
     0.0
 }

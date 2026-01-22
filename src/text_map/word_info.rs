@@ -27,8 +27,8 @@ impl WordInfo {
         bounds: PdfRect,
         line_index: usize,
     ) -> Self {
-        let center_x = (bounds.left.value as f64 + bounds.right.value as f64) / 2.0;
-        let center_y = (bounds.bottom.value as f64 + bounds.top.value as f64) / 2.0;
+        let center_x = (bounds.left().value as f64 + bounds.right().value as f64) / 2.0;
+        let center_y = (bounds.bottom().value as f64 + bounds.top().value as f64) / 2.0;
 
         Self {
             text,

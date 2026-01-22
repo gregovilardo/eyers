@@ -213,3 +213,58 @@ fn find_closest_word_on_line(
 
     Some(closest_idx)
 }
+
+/// Find a word on the same line that starts with the given character (case-insensitive)
+/// Searches forward or backward from current word position
+/// Returns None if no matching word found on the same line
+pub fn find_word_on_line_starting_with(
+    cache: &mut TextMapCache,
+    document: &PdfDocument,
+    page_index: usize,
+    current_word: usize,
+    target_char: char,
+    forward: bool,
+) -> Option<NavResult> {
+    let text_map = cache.get_or_build(page_index, document)?;
+    let current_word_info = text_map.get_word(current_word)?;
+    let line_index = current_word_info.line_index;
+
+    let word_range = text_map.word_indices_on_line(line_index);
+    if word_range.is_empty() {
+        return None;
+    }
+
+    let target_lower = target_char.to_lowercase().next()?;
+
+    if forward {
+        // Search forward from current_word + 1 to end of line
+        for word_idx in (current_word + 1)..word_range.end {
+            if let Some(word) = text_map.get_word(word_idx) {
+                if let Some(first_char) = word.text.chars().next() {
+                    if first_char.to_lowercase().next() == Some(target_lower) {
+                        return Some(NavResult {
+                            page_index,
+                            word_index: word_idx,
+                        });
+                    }
+                }
+            }
+        }
+    } else {
+        // Search backward from current_word - 1 to start of line
+        for word_idx in (word_range.start..current_word).rev() {
+            if let Some(word) = text_map.get_word(word_idx) {
+                if let Some(first_char) = word.text.chars().next() {
+                    if first_char.to_lowercase().next() == Some(target_lower) {
+                        return Some(NavResult {
+                            page_index,
+                            word_index: word_idx,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}

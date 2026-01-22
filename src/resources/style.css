@@ -1,0 +1,55 @@
+/* Eyers PDF Reader Styles */
+
+/* Mode label in header bar */
+.mode-label {
+    font-weight: bold;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+/* TOC Panel */
+.toc-panel {
+    background-color: @window_bg_color;
+    border-right: 1px solid @borders;
+}
+
+.toc-list {
+    background: transparent;
+}
+
+.toc-entry {
+    padding: 8px 16px;
+}
+
+/* Translation Panel */
+.translation-panel {
+    background-color: @window_bg_color;
+    border-top: 1px solid @borders;
+}
+
+.translation-text {
+    padding: 12px;
+}
+
+/* Copy Feedback Popup */
+.copy-feedback {
+    background-color: alpha(@accent_bg_color, 0.95);
+    border-radius: 12px;
+    padding: 16px 24px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.copy-feedback-title {
+    font-weight: bold;
+    font-size: 1.1em;
+    color: @accent_fg_color;
+    margin-bottom: 8px;
+}
+
+.copy-feedback-preview {
+    font-style: italic;
+    font-size: 0.9em;
+    color: alpha(@accent_fg_color, 0.8);
+    max-width: 300px;
+}

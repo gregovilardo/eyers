@@ -131,10 +131,10 @@ impl PageTextMap {
         let mut max_top = f32::MIN;
 
         for c in chars {
-            min_left = min_left.min(c.bounds.left.value);
-            max_right = max_right.max(c.bounds.right.value);
-            min_bottom = min_bottom.min(c.bounds.bottom.value);
-            max_top = max_top.max(c.bounds.top.value);
+            min_left = min_left.min(c.bounds.left().value);
+            max_right = max_right.max(c.bounds.right().value);
+            min_bottom = min_bottom.min(c.bounds.bottom().value);
+            max_top = max_top.max(c.bounds.top().value);
         }
 
         let bounds = PdfRect::new_from_values(min_bottom, min_left, max_top, max_right);
@@ -152,7 +152,7 @@ impl PageTextMap {
         // Calculate average character height for threshold
         let avg_height: f64 = words
             .iter()
-            .map(|w| (w.bounds.top.value - w.bounds.bottom.value) as f64)
+            .map(|w| (w.bounds.top().value - w.bounds.bottom().value) as f64)
             .sum::<f64>()
             / words.len() as f64;
 
@@ -226,7 +226,7 @@ impl PageTextMap {
     /// and set line indices on each word
     fn reorder_words_by_reading_order(
         words: &mut [WordInfo],
-        lines: &mut Vec<LineInfo>,
+        _lines: &mut Vec<LineInfo>,
         _word_indices: &[usize],
         threshold: f64,
     ) -> Vec<LineInfo> {
@@ -335,8 +335,8 @@ impl PageTextMap {
         // In PDF coords, top > bottom
         // We want the first word (in reading order) that overlaps with the viewport
         for (idx, word) in self.words.iter().enumerate() {
-            let word_top = word.bounds.top.value as f64;
-            let word_bottom = word.bounds.bottom.value as f64;
+            let word_top = word.bounds.top().value as f64;
+            let word_bottom = word.bounds.bottom().value as f64;
 
             // Check if word overlaps with rect vertically
             if word_top >= rect_bottom && word_bottom <= rect_top {

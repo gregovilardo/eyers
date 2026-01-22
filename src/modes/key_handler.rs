@@ -22,10 +22,16 @@ pub enum KeyAction {
     ToggleSelection,
     /// Clear selection (Esc with active selection)
     ClearSelection,
-    /// Show definition for current word
+    /// Show definition for current word (or close if already open)
     ShowDefinition { cursor: WordCursor },
-    /// Translate current word or selection
+    /// Translate current word or selection (or close panel if already open)
     Translate { start: WordCursor, end: WordCursor },
+    /// Start find forward (f key pressed, waiting for target char)
+    StartFindForward,
+    /// Start find backward (F key pressed, waiting for target char)
+    StartFindBackward,
+    /// Copy text to clipboard (start and end cursor for range, or same cursor for single word)
+    CopyToClipboard { start: WordCursor, end: WordCursor },
 }
 
 /// Handle a key press in Normal mode
@@ -50,6 +56,7 @@ pub fn handle_normal_mode_key(keyval: gdk::Key) -> KeyAction {
         },
         // Enter visual mode
         gdk::Key::v => KeyAction::EnterVisual,
+        // Note: 'o' for OpenFile is handled directly in handle_mode_key before document check
         _ => KeyAction::None,
     }
 }
@@ -163,6 +170,27 @@ pub fn handle_visual_mode_key(
             } else {
                 // Translate just the cursor word
                 KeyAction::Translate {
+                    start: cursor,
+                    end: cursor,
+                }
+            }
+        }
+
+        // Note: 'o' for OpenFile is handled directly in handle_mode_key before document check
+
+        // Find forward (f + char)
+        gdk::Key::f => KeyAction::StartFindForward,
+
+        // Find backward (F + char)
+        gdk::Key::F => KeyAction::StartFindBackward,
+
+        // Copy to clipboard (selection or cursor word)
+        gdk::Key::c => {
+            if let Some((start, end)) = mode.selection_range() {
+                KeyAction::CopyToClipboard { start, end }
+            } else {
+                // Copy just the cursor word
+                KeyAction::CopyToClipboard {
                     start: cursor,
                     end: cursor,
                 }

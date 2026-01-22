@@ -10,7 +10,7 @@ use std::path::Path;
 use crate::modes::{
     handle_normal_mode_key, handle_visual_mode_key, AppMode, KeyAction, WordCursor,
 };
-use crate::text_map::TextMapCache;
+use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
 use crate::widgets::{EyersHeaderBar, HighlightRect, PdfView, TocPanel, TranslationPanel};
 
 mod imp {
@@ -26,6 +26,8 @@ mod imp {
         pub paned: RefCell<Option<Paned>>,
         pub app_mode: RefCell<AppMode>,
         pub text_cache: RefCell<Option<TextMapCache>>,
+        /// Pending find direction: Some(true) = forward, Some(false) = backward
+        pub pending_find: RefCell<Option<bool>>,
     }
 
     impl Default for EyersWindow {
@@ -40,6 +42,7 @@ mod imp {
                 paned: RefCell::new(None),
                 app_mode: RefCell::new(AppMode::default()),
                 text_cache: RefCell::new(None),
+                pending_find: RefCell::new(None),
             }
         }
     }
@@ -203,7 +206,7 @@ impl EyersWindow {
         let controller = gtk::EventControllerKey::new();
         let window_weak = self.downgrade();
 
-        controller.connect_key_pressed(move |_, key, _, _| {
+        controller.connect_key_pressed(move |_, key, _, modifiers| {
             if let Some(window) = window_weak.upgrade() {
                 let imp = window.imp();
                 let toc_visible = imp.toc_panel.is_visible();
@@ -235,7 +238,7 @@ impl EyersWindow {
                     }
                 } else {
                     // Handle mode-based key events
-                    if window.handle_mode_key(key) {
+                    if window.handle_mode_key(key, modifiers) {
                         return glib::Propagation::Stop;
                     }
                 }
@@ -247,10 +250,40 @@ impl EyersWindow {
     }
 
     /// Handle key press based on current mode
-    fn handle_mode_key(&self, key: gtk::gdk::Key) -> bool {
+    fn handle_mode_key(&self, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
         let imp = self.imp();
 
-        // Need document to be loaded for mode operations
+        // Handle Ctrl+d / Ctrl+u for half-page scrolling (works in both modes)
+        if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+            match key {
+                gtk::gdk::Key::d => {
+                    self.scroll_half_page(true); // down
+                    return true;
+                }
+                gtk::gdk::Key::u => {
+                    self.scroll_half_page(false); // up
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
+        // Check if we're waiting for a find target character (f/F was pressed)
+        if let Some(forward) = imp.pending_find.take() {
+            if let Some(ch) = key.to_unicode() {
+                return self.execute_find(ch, forward);
+            }
+            // Invalid key (not a character), just clear pending and do nothing
+            return false;
+        }
+
+        // Handle 'o' key for opening files - works even without document loaded
+        if key == gtk::gdk::Key::o {
+            self.show_open_dialog();
+            return true;
+        }
+
+        // Need document to be loaded for other mode operations
         if !imp.pdf_view.has_document() {
             return false;
         }
@@ -334,7 +367,8 @@ impl EyersWindow {
                     mode.set_cursor(cursor);
                 }
                 imp.pdf_view.set_cursor(Some(cursor));
-                self.update_highlights();
+                // Update selection display to sync anchor-to-cursor range if selection is active
+                self.update_selection_display();
                 self.ensure_cursor_visible(cursor);
                 self.print_cursor_word(cursor);
                 true
@@ -360,12 +394,37 @@ impl EyersWindow {
             }
 
             KeyAction::ShowDefinition { cursor } => {
-                self.show_definition_for_cursor(cursor);
+                // Toggle: if popover is open, close it; otherwise show definition
+                if imp.pdf_view.has_popover() {
+                    imp.pdf_view.close_current_popover();
+                } else {
+                    self.show_definition_for_cursor(cursor);
+                }
                 true
             }
 
             KeyAction::Translate { start, end } => {
-                self.translate_range(start, end);
+                // Toggle: if translation panel is visible, hide it; otherwise translate
+                if imp.translation_panel.is_visible() {
+                    imp.translation_panel.set_visible(false);
+                } else {
+                    self.translate_range(start, end);
+                }
+                true
+            }
+
+            KeyAction::StartFindForward => {
+                self.imp().pending_find.replace(Some(true));
+                true
+            }
+
+            KeyAction::StartFindBackward => {
+                self.imp().pending_find.replace(Some(false));
+                true
+            }
+
+            KeyAction::CopyToClipboard { start, end } => {
+                self.copy_range_to_clipboard(start, end);
                 true
             }
         }
@@ -392,6 +451,26 @@ impl EyersWindow {
                     .max(hadj.lower())
                     .min(hadj.upper() - page_size);
                 hadj.set_value(new_value);
+            }
+        }
+    }
+
+    /// Scroll half a page and update cursor in Visual mode
+    fn scroll_half_page(&self, down: bool) {
+        let imp = self.imp();
+        let y_percent = if down { 50.0 } else { -50.0 };
+        self.scroll_by_percent(0.0, y_percent);
+
+        // In Visual mode, update cursor to first visible word
+        if imp.app_mode.borrow().is_visual() {
+            if let Some(cursor) = self.compute_first_visible_word() {
+                {
+                    let mut mode = imp.app_mode.borrow_mut();
+                    mode.set_cursor(cursor);
+                }
+                imp.pdf_view.set_cursor(Some(cursor));
+                self.update_selection_display();
+                self.print_cursor_word(cursor);
             }
         }
     }
@@ -635,10 +714,9 @@ impl EyersWindow {
         };
 
         let doc_borrow = imp.pdf_view.document();
-        let doc = match doc_borrow.as_ref() {
-            Some(d) => d,
-            None => return,
-        };
+        if doc_borrow.is_none() {
+            return;
+        }
 
         let cache = imp.text_cache.borrow();
         let cache = match cache.as_ref() {
@@ -722,20 +800,18 @@ impl EyersWindow {
         println!("Definition for: {}", word_text);
 
         // Use the definition popover
-        if let Some(picture) = imp.pdf_view.page_picture(cursor.page_index as u16) {
-            let page_pictures = imp.pdf_view.page_pictures();
-            if let Some(pic) = page_pictures.get(cursor.page_index) {
-                // Calculate screen position for popover
-                let scale = crate::services::pdf_text::RENDER_WIDTH as f64 / text_map.page_width;
-                let screen_x = word.center_x * scale;
-                let screen_y = (text_map.page_height - word.center_y) * scale;
+        let page_pictures = imp.pdf_view.page_pictures();
+        if let Some(pic) = page_pictures.get(cursor.page_index) {
+            // Calculate screen position for popover
+            let scale = crate::services::pdf_text::RENDER_WIDTH as f64 / text_map.page_width;
+            let screen_x = word.center_x * scale;
+            let screen_y = (text_map.page_height - word.center_y) * scale;
 
-                let popover = crate::widgets::DefinitionPopover::new();
-                popover.show_at(pic, screen_x, screen_y);
-                popover.fetch_and_display(word_text.clone(), word_text.to_lowercase());
+            let popover = crate::widgets::DefinitionPopover::new();
+            popover.show_at(pic, screen_x, screen_y);
+            popover.fetch_and_display(word_text.clone(), word_text.to_lowercase());
 
-                imp.pdf_view.set_current_popover(Some(popover));
-            }
+            imp.pdf_view.set_current_popover(Some(popover));
         }
     }
 
@@ -807,6 +883,193 @@ impl EyersWindow {
             imp.translation_panel.set_visible(true);
             imp.translation_panel.translate(text);
         }
+    }
+
+    /// Execute a find operation (f/F + char)
+    fn execute_find(&self, target_char: char, forward: bool) -> bool {
+        let imp = self.imp();
+
+        // Only works in Visual mode
+        let cursor = match imp.app_mode.borrow().cursor() {
+            Some(c) => c,
+            None => return false,
+        };
+
+        // Find the target word - scope the borrows
+        let new_cursor = {
+            let doc_borrow = imp.pdf_view.document();
+            let doc = match doc_borrow.as_ref() {
+                Some(d) => d,
+                None => return false,
+            };
+
+            let mut cache = imp.text_cache.borrow_mut();
+            let cache = match cache.as_mut() {
+                Some(c) => c,
+                None => return false,
+            };
+
+            // Find word on same line starting with target_char
+            find_word_on_line_starting_with(
+                cache,
+                doc,
+                cursor.page_index,
+                cursor.word_index,
+                target_char,
+                forward,
+            )
+            .map(|result| WordCursor::new(result.page_index, result.word_index))
+        };
+
+        // Update cursor if found
+        if let Some(new_cursor) = new_cursor {
+            {
+                let mut mode = imp.app_mode.borrow_mut();
+                mode.set_cursor(new_cursor);
+            }
+            imp.pdf_view.set_cursor(Some(new_cursor));
+            self.update_selection_display();
+            self.ensure_cursor_visible(new_cursor);
+            self.print_cursor_word(new_cursor);
+            true
+        } else {
+            // No match found, do nothing
+            false
+        }
+    }
+
+    /// Copy text range to clipboard and show feedback popup
+    fn copy_range_to_clipboard(&self, start: WordCursor, end: WordCursor) {
+        let imp = self.imp();
+
+        // Extract text with scoped borrow
+        let text = {
+            let cache = imp.text_cache.borrow();
+            match cache.as_ref() {
+                Some(c) => self.extract_text_range(c, start, end),
+                None => return,
+            }
+        };
+
+        if !text.is_empty() {
+            let clipboard = self.clipboard();
+            clipboard.set_text(&text);
+            self.show_copy_feedback(&text);
+        }
+    }
+
+    /// Extract text from a cursor range (reusable helper)
+    fn extract_text_range(
+        &self,
+        cache: &TextMapCache,
+        start: WordCursor,
+        end: WordCursor,
+    ) -> String {
+        let mut text_parts: Vec<String> = Vec::new();
+
+        if start.page_index == end.page_index {
+            // Same page
+            if let Some(text_map) = cache.get(start.page_index) {
+                let word_start = start.word_index.min(end.word_index);
+                let word_end = start.word_index.max(end.word_index);
+
+                for idx in word_start..=word_end {
+                    if let Some(word) = text_map.get_word(idx) {
+                        text_parts.push(word.text.clone());
+                    }
+                }
+            }
+        } else {
+            // Cross-page selection
+            let (first, last) = if start.page_index < end.page_index {
+                (start, end)
+            } else {
+                (end, start)
+            };
+
+            // First page
+            if let Some(text_map) = cache.get(first.page_index) {
+                for idx in first.word_index..text_map.word_count() {
+                    if let Some(word) = text_map.get_word(idx) {
+                        text_parts.push(word.text.clone());
+                    }
+                }
+            }
+
+            // Middle pages
+            for page_idx in (first.page_index + 1)..last.page_index {
+                if let Some(text_map) = cache.get(page_idx) {
+                    for idx in 0..text_map.word_count() {
+                        if let Some(word) = text_map.get_word(idx) {
+                            text_parts.push(word.text.clone());
+                        }
+                    }
+                }
+            }
+
+            // Last page
+            if let Some(text_map) = cache.get(last.page_index) {
+                for idx in 0..=last.word_index {
+                    if let Some(word) = text_map.get_word(idx) {
+                        text_parts.push(word.text.clone());
+                    }
+                }
+            }
+        }
+
+        text_parts.join(" ")
+    }
+
+    /// Show a brief feedback popup when text is copied
+    fn show_copy_feedback(&self, text: &str) {
+        // Create a small popup window for feedback
+        let popup = gtk::Window::builder()
+            .transient_for(self)
+            .modal(false)
+            .decorated(false)
+            .resizable(false)
+            .build();
+
+        // Add CSS class for styling
+        popup.add_css_class("copy-feedback");
+
+        let content = gtk::Box::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .margin_start(12)
+            .margin_end(12)
+            .margin_top(8)
+            .margin_bottom(8)
+            .build();
+
+        let label = gtk::Label::new(Some("Copied!"));
+        label.add_css_class("copy-feedback-title");
+
+        // Show a preview of copied text (truncated if too long)
+        let preview = if text.len() > 50 {
+            format!("{}...", &text[..47])
+        } else {
+            text.to_string()
+        };
+        let preview_label = gtk::Label::new(Some(&preview));
+        preview_label.add_css_class("copy-feedback-preview");
+        preview_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        preview_label.set_max_width_chars(40);
+
+        content.append(&label);
+        content.append(&preview_label);
+        popup.set_child(Some(&content));
+
+        // Position near the top-center of the main window
+        popup.present();
+
+        // Auto-close after 1.5 seconds
+        let popup_weak = popup.downgrade();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+            if let Some(p) = popup_weak.upgrade() {
+                p.close();
+            }
+        });
     }
 
     fn toggle_toc_panel(&self) {

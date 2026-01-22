@@ -569,6 +569,11 @@ impl PdfView {
         self.close_current_popover();
         self.imp().current_popover.replace(popover);
     }
+
+    /// Check if there's a popover currently open
+    pub fn has_popover(&self) -> bool {
+        self.imp().current_popover.borrow().is_some()
+    }
 }
 
 impl Default for PdfView {

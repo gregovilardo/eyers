@@ -1,8 +1,10 @@
+mod modes;
 mod services;
+mod text_map;
 mod widgets;
 
 use gtk::prelude::*;
-use gtk::{Application, glib};
+use gtk::{glib, Application};
 use widgets::EyersWindow;
 
 const APP_ID: &str = "org.gtk_rs.eyers";

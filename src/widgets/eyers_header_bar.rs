@@ -2,7 +2,7 @@ use glib::Properties;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{Button, HeaderBar, ToggleButton};
+use gtk::{Button, HeaderBar, Label, ToggleButton};
 use std::cell::Cell;
 
 mod imp {
@@ -15,6 +15,7 @@ mod imp {
         pub open_button: Button,
         pub definitions_toggle: ToggleButton,
         pub translate_toggle: ToggleButton,
+        pub mode_label: Label,
 
         #[property(get, set, default = false)]
         pub definitions_enabled: Cell<bool>,
@@ -50,6 +51,11 @@ impl EyersHeaderBar {
 
     fn setup_widgets(&self) {
         let imp = self.imp();
+
+        // Mode label (left side, before open button)
+        imp.mode_label.set_label("NORMAL");
+        imp.mode_label.add_css_class("mode-label");
+        imp.header_bar.pack_start(&imp.mode_label);
 
         // Configure the header bar
         imp.header_bar
@@ -122,6 +128,15 @@ impl EyersHeaderBar {
 
     pub fn translate_toggle(&self) -> &ToggleButton {
         &self.imp().translate_toggle
+    }
+
+    pub fn mode_label(&self) -> &Label {
+        &self.imp().mode_label
+    }
+
+    /// Update the mode label text
+    pub fn set_mode_text(&self, mode: &str) {
+        self.imp().mode_label.set_label(mode);
     }
 }
 

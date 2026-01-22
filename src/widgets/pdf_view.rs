@@ -1,14 +1,15 @@
-use glib::Properties;
 use glib::subclass::Signal;
+use glib::Properties;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{Box, GestureClick, Orientation, Picture};
+use gtk::{Box, GestureClick, Orientation, Overlay, Picture};
 use pdfium_render::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use crate::modes::WordCursor;
 use crate::services::bookmarks;
 use crate::services::pdf_text::{
     self, calculate_click_coordinates_with_offset, calculate_page_dimensions,
@@ -16,6 +17,7 @@ use crate::services::pdf_text::{
     find_char_index_at_click,
 };
 use crate::widgets::DefinitionPopover;
+use crate::widgets::HighlightOverlay;
 
 /// Represents a selection point in the PDF
 #[derive(Clone, Debug)]
@@ -38,9 +40,13 @@ mod imp {
         pub current_popover: RefCell<Option<DefinitionPopover>>,
         pub bookmarks: RefCell<Option<Vec<bookmarks::BookmarkEntry>>>,
         pub(super) page_pictures: RefCell<Vec<Picture>>,
+        pub(super) page_overlays: RefCell<Vec<Overlay>>,
+        pub(super) highlight_overlays: RefCell<Vec<HighlightOverlay>>,
         pub selection_start: RefCell<Option<SelectionPoint>>,
         pub current_page: Cell<u16>,
         pub pending_update: Cell<bool>,
+        pub visual_cursor: RefCell<Option<WordCursor>>,
+        pub visual_selection: RefCell<Option<(WordCursor, WordCursor)>>,
         #[property(get, set, default = false)]
         pub definitions_enabled: Cell<bool>,
         #[property(get, set, default = false)]
@@ -64,11 +70,9 @@ mod imp {
         fn signals() -> &'static [Signal] {
             static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
             SIGNALS.get_or_init(|| {
-                vec![
-                    Signal::builder("translate-requested")
-                        .param_types([String::static_type()])
-                        .build(),
-                ]
+                vec![Signal::builder("translate-requested")
+                    .param_types([String::static_type()])
+                    .build()]
             })
         }
     }
@@ -127,6 +131,8 @@ impl PdfView {
             self.remove(&child);
         }
         self.imp().page_pictures.borrow_mut().clear();
+        self.imp().page_overlays.borrow_mut().clear();
+        self.imp().highlight_overlays.borrow_mut().clear();
     }
 
     fn render_pages(&self) {
@@ -137,18 +143,28 @@ impl PdfView {
         };
 
         let mut page_pictures = Vec::new();
+        let mut page_overlays = Vec::new();
+        let mut highlight_overlays = Vec::new();
 
         for (index, page) in doc.pages().iter().enumerate() {
-            if let Some(picture) = self.render_single_page(&page, index) {
-                self.append(&picture);
+            if let Some((picture, overlay, highlight)) = self.render_single_page(&page, index) {
+                self.append(&overlay);
                 page_pictures.push(picture);
+                page_overlays.push(overlay);
+                highlight_overlays.push(highlight);
             }
         }
 
         self.imp().page_pictures.replace(page_pictures);
+        self.imp().page_overlays.replace(page_overlays);
+        self.imp().highlight_overlays.replace(highlight_overlays);
     }
 
-    fn render_single_page(&self, page: &PdfPage, page_index: usize) -> Option<Picture> {
+    fn render_single_page(
+        &self,
+        page: &PdfPage,
+        page_index: usize,
+    ) -> Option<(Picture, Overlay, HighlightOverlay)> {
         let config = create_render_config();
         let bitmap = page.render_with_config(&config).ok()?;
 
@@ -160,9 +176,19 @@ impl PdfView {
             .paintable(&texture)
             .build();
 
+        // Create highlight overlay with same size as the rendered image
+        let highlight = HighlightOverlay::new();
+        highlight.set_content_width(dimensions.width);
+        highlight.set_content_height(dimensions.height);
+
+        // Wrap picture and highlight in an Overlay
+        let overlay = Overlay::new();
+        overlay.set_child(Some(&picture));
+        overlay.add_overlay(&highlight);
+
         self.setup_page_gesture(&picture, page_index);
 
-        Some(picture)
+        Some((picture, overlay, highlight))
     }
 
     fn create_texture_from_bitmap(
@@ -481,6 +507,67 @@ impl PdfView {
 
     pub fn bookmarks(&self) -> Vec<bookmarks::BookmarkEntry> {
         self.imp().bookmarks.borrow().clone().unwrap_or_default()
+    }
+
+    /// Get a reference to the document
+    pub fn document(&self) -> std::cell::Ref<'_, Option<PdfDocument<'static>>> {
+        self.imp().document.borrow()
+    }
+
+    /// Get the highlight overlay for a specific page
+    pub fn highlight_overlay(&self, page_index: usize) -> Option<HighlightOverlay> {
+        self.imp()
+            .highlight_overlays
+            .borrow()
+            .get(page_index)
+            .cloned()
+    }
+
+    /// Get all highlight overlays
+    pub fn highlight_overlays(&self) -> std::cell::Ref<'_, Vec<HighlightOverlay>> {
+        self.imp().highlight_overlays.borrow()
+    }
+
+    /// Set the visual cursor position
+    pub fn set_cursor(&self, cursor: Option<WordCursor>) {
+        self.imp().visual_cursor.replace(cursor);
+        // Note: actual highlight drawing is done by EyersWindow via update_highlights()
+    }
+
+    /// Get the current visual cursor
+    pub fn cursor(&self) -> Option<WordCursor> {
+        *self.imp().visual_cursor.borrow()
+    }
+
+    /// Set the visual selection range
+    pub fn set_selection(&self, selection: Option<(WordCursor, WordCursor)>) {
+        self.imp().visual_selection.replace(selection);
+        // Note: actual highlight drawing is done by EyersWindow via update_highlights()
+    }
+
+    /// Clear the visual selection
+    pub fn clear_selection(&self) {
+        self.imp().visual_selection.replace(None);
+        // Note: actual highlight drawing is done by EyersWindow via update_highlights()
+    }
+
+    /// Get the current visual selection
+    pub fn selection(&self) -> Option<(WordCursor, WordCursor)> {
+        *self.imp().visual_selection.borrow()
+    }
+
+    /// Clear all highlight overlays
+    pub fn clear_all_highlights(&self) {
+        for overlay in self.imp().highlight_overlays.borrow().iter() {
+            overlay.clear();
+        }
+    }
+
+    /// Set the current popover (for external use)
+    pub fn set_current_popover(&self, popover: Option<DefinitionPopover>) {
+        // Close existing popover first
+        self.close_current_popover();
+        self.imp().current_popover.replace(popover);
     }
 }
 

@@ -4,14 +4,14 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{ApplicationWindow, Box, Orientation, Paned, PolicyType, ScrolledWindow};
 use pdfium_render::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 
 use crate::modes::{
-    AppMode, KeyAction, WordCursor, handle_normal_mode_key, handle_visual_mode_key,
+    handle_normal_mode_key, handle_visual_mode_key, AppMode, KeyAction, WordCursor,
 };
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
+use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
 use crate::widgets::{EyersHeaderBar, HighlightRect, PdfView, TocPanel, TranslationPanel};
 
 mod imp {
@@ -29,6 +29,8 @@ mod imp {
         pub text_cache: RefCell<Option<TextMapCache>>,
         /// Pending find direction: Some(true) = forward, Some(false) = backward
         pub pending_find: RefCell<Option<bool>>,
+        /// Pending 'g' key for gg command
+        pub pending_g: Cell<bool>,
         /// Toast revealer for copy feedback
         pub toast_revealer: gtk::Revealer,
         /// Toast label for displaying message
@@ -57,6 +59,7 @@ mod imp {
                 app_mode: RefCell::new(AppMode::default()),
                 text_cache: RefCell::new(None),
                 pending_find: RefCell::new(None),
+                pending_g: Cell::new(false),
                 toast_revealer,
                 toast_label,
             }
@@ -349,15 +352,19 @@ impl EyersWindow {
         }
 
         let mode = imp.app_mode.borrow().clone();
+        let pending_g = imp.pending_g.get();
+
+        // Clear pending_g state (will be set again if needed by PendingG action)
+        imp.pending_g.set(false);
 
         let action = match &mode {
-            AppMode::Normal => handle_normal_mode_key(key),
+            AppMode::Normal => handle_normal_mode_key(key, pending_g),
             AppMode::Visual { .. } => {
                 let doc_borrow = imp.pdf_view.document();
                 if let Some(ref doc) = *doc_borrow {
                     let mut cache = imp.text_cache.borrow_mut();
                     if let Some(ref mut cache) = *cache {
-                        handle_visual_mode_key(key, &mode, cache, doc)
+                        handle_visual_mode_key(key, &mode, cache, doc, pending_g)
                     } else {
                         return false;
                     }
@@ -487,6 +494,31 @@ impl EyersWindow {
                 self.copy_range_to_clipboard(start, end);
                 true
             }
+
+            KeyAction::ScrollToStart => {
+                self.scroll_to_document_start();
+                true
+            }
+
+            KeyAction::ScrollToEnd => {
+                self.scroll_to_document_end();
+                true
+            }
+
+            KeyAction::PendingG => {
+                imp.pending_g.set(true);
+                true
+            }
+
+            KeyAction::ZoomIn => {
+                self.zoom_in();
+                true
+            }
+
+            KeyAction::ZoomOut => {
+                self.zoom_out();
+                true
+            }
         }
     }
 
@@ -536,6 +568,166 @@ impl EyersWindow {
         }
     }
 
+    /// Scroll to the start of the document (gg in vim)
+    fn scroll_to_document_start(&self) {
+        let imp = self.imp();
+
+        // Scroll to page 0
+        imp.pdf_view.scroll_to_page(0);
+
+        // In Visual mode, move cursor to first word of first page
+        if imp.app_mode.borrow().is_visual() {
+            if let Some(cursor) = self.compute_first_word_of_page(0) {
+                {
+                    let mut mode = imp.app_mode.borrow_mut();
+                    mode.set_cursor(cursor);
+                }
+                imp.pdf_view.set_cursor(Some(cursor));
+                self.update_selection_display();
+                self.print_cursor_word(cursor);
+            }
+        }
+    }
+
+    /// Scroll to the end of the document (G in vim)
+    fn scroll_to_document_end(&self) {
+        let imp = self.imp();
+
+        let doc_borrow = imp.pdf_view.document();
+        let last_page = match doc_borrow.as_ref() {
+            Some(doc) => {
+                let page_count = doc.pages().len();
+                if page_count > 0 {
+                    page_count - 1
+                } else {
+                    return;
+                }
+            }
+            None => return,
+        };
+        drop(doc_borrow);
+
+        // Scroll to last page
+        imp.pdf_view.scroll_to_page(last_page);
+
+        // In Visual mode, move cursor to last word of last page
+        if imp.app_mode.borrow().is_visual() {
+            if let Some(cursor) = self.compute_last_word_of_page(last_page as usize) {
+                {
+                    let mut mode = imp.app_mode.borrow_mut();
+                    mode.set_cursor(cursor);
+                }
+                imp.pdf_view.set_cursor(Some(cursor));
+                self.update_selection_display();
+                self.ensure_cursor_visible(cursor);
+                self.print_cursor_word(cursor);
+            }
+        }
+    }
+
+    /// Compute the first word of a specific page
+    fn compute_first_word_of_page(&self, page_index: usize) -> Option<WordCursor> {
+        let imp = self.imp();
+
+        let doc_borrow = imp.pdf_view.document();
+        let doc = doc_borrow.as_ref()?;
+
+        let mut cache = imp.text_cache.borrow_mut();
+        let cache = cache.as_mut()?;
+
+        if let Some(text_map) = cache.get_or_build(page_index, doc) {
+            if text_map.word_count() > 0 {
+                return Some(WordCursor::new(page_index, 0));
+            }
+        }
+
+        None
+    }
+
+    /// Compute the last word of a specific page
+    fn compute_last_word_of_page(&self, page_index: usize) -> Option<WordCursor> {
+        let imp = self.imp();
+
+        let doc_borrow = imp.pdf_view.document();
+        let doc = doc_borrow.as_ref()?;
+
+        let mut cache = imp.text_cache.borrow_mut();
+        let cache = cache.as_mut()?;
+
+        if let Some(text_map) = cache.get_or_build(page_index, doc) {
+            let word_count = text_map.word_count();
+            if word_count > 0 {
+                return Some(WordCursor::new(page_index, word_count - 1));
+            }
+        }
+
+        None
+    }
+
+    /// Zoom in by 10%, max 300%
+    fn zoom_in(&self) {
+        let imp = self.imp();
+        let current_zoom = imp.pdf_view.zoom_level();
+        let new_zoom = (current_zoom * 1.1).min(3.0);
+
+        if (new_zoom - current_zoom).abs() > 0.001 {
+            self.apply_zoom(new_zoom);
+        }
+    }
+
+    /// Zoom out by 10%, min 50%
+    fn zoom_out(&self) {
+        let imp = self.imp();
+        let current_zoom = imp.pdf_view.zoom_level();
+        let new_zoom = (current_zoom / 1.1).max(0.5);
+
+        if (new_zoom - current_zoom).abs() > 0.001 {
+            self.apply_zoom(new_zoom);
+        }
+    }
+
+    /// Apply a new zoom level, preserving scroll position
+    fn apply_zoom(&self, new_zoom: f64) {
+        let imp = self.imp();
+
+        // Get current scroll position as a ratio
+        let scroll_ratio = if let Some(scrolled) = imp.scrolled_window.borrow().as_ref() {
+            let vadj = scrolled.vadjustment();
+            let upper = vadj.upper() - vadj.page_size();
+            if upper > 0.0 {
+                vadj.value() / upper
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        // Apply the new zoom level (this re-renders all pages)
+        imp.pdf_view.set_zoom_level(new_zoom);
+
+        // Restore scroll position after a brief delay to allow layout to update
+        let window_weak = self.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(window) = window_weak.upgrade() {
+                if let Some(scrolled) = window.imp().scrolled_window.borrow().as_ref() {
+                    let vadj = scrolled.vadjustment();
+                    let upper = vadj.upper() - vadj.page_size();
+                    if upper > 0.0 {
+                        vadj.set_value(scroll_ratio * upper);
+                    }
+                }
+
+                // Update highlights if in visual mode
+                if window.imp().app_mode.borrow().is_visual() {
+                    window.update_highlights();
+                }
+            }
+        });
+
+        println!("Zoom: {:.0}%", new_zoom * 100.0);
+    }
+
     /// Compute a word at a given offset from the top of the viewport
     /// `offset_percent` is 0.0 for top, 1.0 for bottom (e.g., 0.20 = 20% from top)
     fn compute_word_at_viewport_offset(&self, offset_percent: f64) -> Option<WordCursor> {
@@ -572,7 +764,10 @@ impl EyersWindow {
                     if text_map.word_count() > 0 {
                         let page_width_pts = text_map.page_width;
                         let page_height_pts = text_map.page_height;
-                        let scale = crate::services::pdf_text::RENDER_WIDTH as f64 / page_width_pts;
+                        let render_width = crate::services::pdf_text::get_render_width_for_zoom(
+                            imp.pdf_view.zoom_level(),
+                        );
+                        let scale = render_width as f64 / page_width_pts;
 
                         // Convert target_y to position within page (screen coords relative to page)
                         let target_y_in_page = target_y - page_top;
@@ -646,7 +841,10 @@ impl EyersWindow {
                         // Calculate viewport rect in PDF coordinates
                         let page_width_pts = text_map.page_width;
                         let page_height_pts = text_map.page_height;
-                        let scale = crate::services::pdf_text::RENDER_WIDTH as f64 / page_width_pts;
+                        let render_width = crate::services::pdf_text::get_render_width_for_zoom(
+                            imp.pdf_view.zoom_level(),
+                        );
+                        let scale = render_width as f64 / page_width_pts;
 
                         // Visible portion of this page in screen coords
                         let visible_top_screen = (scroll_y - page_top).max(0.0);
@@ -724,6 +922,10 @@ impl EyersWindow {
         // Get page pictures for calculating offsets
         let page_pictures = imp.pdf_view.page_pictures();
 
+        // Get effective render width based on zoom level
+        let render_width =
+            crate::services::pdf_text::get_render_width_for_zoom(imp.pdf_view.zoom_level());
+
         // Helper closure to get x_offset for a page
         let get_x_offset = |page_index: usize| -> f64 {
             page_pictures
@@ -748,6 +950,7 @@ impl EyersWindow {
                         text_map.page_width,
                         text_map.page_height,
                         x_offset,
+                        render_width,
                     );
                     page_highlights
                         .entry(cursor.page_index)
@@ -777,6 +980,7 @@ impl EyersWindow {
                                 text_map.page_width,
                                 text_map.page_height,
                                 x_offset,
+                                render_width,
                             );
                             page_highlights
                                 .entry(first.page_index)
@@ -798,6 +1002,7 @@ impl EyersWindow {
                                 text_map.page_width,
                                 text_map.page_height,
                                 x_offset,
+                                render_width,
                             );
                             page_highlights
                                 .entry(first.page_index)
@@ -819,6 +1024,7 @@ impl EyersWindow {
                                     text_map.page_width,
                                     text_map.page_height,
                                     x_offset,
+                                    render_width,
                                 );
                                 page_highlights
                                     .entry(page_idx)
@@ -840,6 +1046,7 @@ impl EyersWindow {
                                 text_map.page_width,
                                 text_map.page_height,
                                 x_offset,
+                                render_width,
                             );
                             page_highlights
                                 .entry(last.page_index)
@@ -905,7 +1112,9 @@ impl EyersWindow {
         let page_top = cursor.page_index as f64 * (picture_height + spacing);
 
         // Convert word center to screen coords
-        let scale = crate::services::pdf_text::RENDER_WIDTH as f64 / text_map.page_width;
+        let render_width =
+            crate::services::pdf_text::get_render_width_for_zoom(imp.pdf_view.zoom_level());
+        let scale = render_width as f64 / text_map.page_width;
         let word_y_screen = page_top + (text_map.page_height - word.center_y) * scale;
 
         // Get viewport info
@@ -958,7 +1167,9 @@ impl EyersWindow {
         let page_pictures = imp.pdf_view.page_pictures();
         if let Some(pic) = page_pictures.get(cursor.page_index) {
             // Calculate screen position for popover (including x_offset for centering)
-            let scale = crate::services::pdf_text::RENDER_WIDTH as f64 / text_map.page_width;
+            let render_width =
+                crate::services::pdf_text::get_render_width_for_zoom(imp.pdf_view.zoom_level());
+            let scale = render_width as f64 / text_map.page_width;
             let x_offset = calculate_picture_offset(pic);
             let screen_x = word.center_x * scale + x_offset;
             let screen_y = (text_map.page_height - word.center_y) * scale;

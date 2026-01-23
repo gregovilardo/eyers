@@ -4,8 +4,6 @@ use gtk::subclass::prelude::*;
 use pdfium_render::prelude::PdfRect;
 use std::cell::RefCell;
 
-use crate::services::pdf_text::RENDER_WIDTH;
-
 /// A rectangle in screen coordinates for highlighting
 #[derive(Debug, Clone, Copy)]
 pub struct HighlightRect {
@@ -21,6 +19,7 @@ impl HighlightRect {
     /// PDF coordinates: origin at bottom-left, y increases upward
     /// Screen coordinates: origin at top-left, y increases downward
     ///
+    /// `render_width` is the effective render width (RENDER_WIDTH * zoom_level)
     /// `x_offset` accounts for horizontal centering when the Picture is narrower
     /// than its container (e.g., in fullscreen mode)
     pub fn from_pdf_bounds(
@@ -28,8 +27,9 @@ impl HighlightRect {
         page_width: f64,
         page_height: f64,
         x_offset: f64,
+        render_width: i32,
     ) -> Self {
-        let scale = RENDER_WIDTH as f64 / page_width;
+        let scale = render_width as f64 / page_width;
 
         // PDF coords -> screen coords
         // screen_x = pdf_x * scale + x_offset (account for centering)

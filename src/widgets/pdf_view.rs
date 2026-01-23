@@ -6,6 +6,7 @@ use gtk::subclass::prelude::*;
 use gtk::{Box, GestureClick, Orientation, Overlay, Picture};
 use pdfium_render::prelude::*;
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -13,7 +14,7 @@ use crate::modes::WordCursor;
 use crate::services::bookmarks;
 use crate::services::pdf_text::{
     self, calculate_click_coordinates_with_offset, calculate_page_dimensions,
-    calculate_picture_offset, create_render_config, extract_word_at_index,
+    calculate_picture_offset, create_render_config_with_zoom, extract_word_at_index,
     find_char_index_at_click,
 };
 use crate::widgets::DefinitionPopover;
@@ -32,7 +33,7 @@ pub struct SelectionPoint {
 mod imp {
     use super::*;
 
-    #[derive(Properties, Default)]
+    #[derive(Properties)]
     #[properties(wrapper_type = super::PdfView)]
     pub struct PdfView {
         pub document: RefCell<Option<PdfDocument<'static>>>,
@@ -42,15 +43,42 @@ mod imp {
         pub(super) page_pictures: RefCell<Vec<Picture>>,
         pub(super) page_overlays: RefCell<Vec<Overlay>>,
         pub(super) highlight_overlays: RefCell<Vec<HighlightOverlay>>,
+        /// Tracks which pages have been rendered at current zoom level
+        pub(super) rendered_pages: RefCell<HashSet<usize>>,
         pub selection_start: RefCell<Option<SelectionPoint>>,
         pub current_page: Cell<u16>,
         pub pending_update: Cell<bool>,
         pub visual_cursor: RefCell<Option<WordCursor>>,
         pub visual_selection: RefCell<Option<(WordCursor, WordCursor)>>,
+        /// Current zoom level (1.0 = 100%)
+        pub zoom_level: Cell<f64>,
         #[property(get, set, default = false)]
         pub definitions_enabled: Cell<bool>,
         #[property(get, set, default = false)]
         pub translate_enabled: Cell<bool>,
+    }
+
+    impl Default for PdfView {
+        fn default() -> Self {
+            Self {
+                document: RefCell::new(None),
+                pdfium: RefCell::new(None),
+                current_popover: RefCell::new(None),
+                bookmarks: RefCell::new(None),
+                page_pictures: RefCell::new(Vec::new()),
+                page_overlays: RefCell::new(Vec::new()),
+                highlight_overlays: RefCell::new(Vec::new()),
+                rendered_pages: RefCell::new(HashSet::new()),
+                selection_start: RefCell::new(None),
+                current_page: Cell::new(0),
+                pending_update: Cell::new(false),
+                visual_cursor: RefCell::new(None),
+                visual_selection: RefCell::new(None),
+                zoom_level: Cell::new(1.0),
+                definitions_enabled: Cell::new(false),
+                translate_enabled: Cell::new(false),
+            }
+        }
     }
 
     #[glib::object_subclass]
@@ -133,8 +161,35 @@ impl PdfView {
         self.imp().page_pictures.borrow_mut().clear();
         self.imp().page_overlays.borrow_mut().clear();
         self.imp().highlight_overlays.borrow_mut().clear();
+        self.imp().rendered_pages.borrow_mut().clear();
     }
 
+    /// Calculate page dimensions at current zoom level without rendering
+    fn calculate_page_size(&self, page: &PdfPage) -> (i32, i32) {
+        let zoom = self.imp().zoom_level.get();
+        let render_width = crate::services::pdf_text::get_render_width_for_zoom(zoom);
+        let page_width_pts = page.width().value as f64;
+        let page_height_pts = page.height().value as f64;
+        let scale = render_width as f64 / page_width_pts;
+        let height = (page_height_pts * scale) as i32;
+        (render_width, height)
+    }
+
+    /// Create a placeholder Picture with the correct size (no pixel allocation)
+    fn create_placeholder(&self, width: i32, height: i32) -> Picture {
+        // Just set size request - no pixel buffer needed
+        let picture = Picture::builder()
+            .can_shrink(false)
+            .width_request(width)
+            .height_request(height)
+            .build();
+
+        // Add CSS class for styling (gray background)
+        picture.add_css_class("pdf-placeholder");
+        picture
+    }
+
+    /// Set up page structure with placeholders (fast - no rendering)
     fn render_pages(&self) {
         let doc_borrow = self.imp().document.borrow();
         let doc = match doc_borrow.as_ref() {
@@ -147,48 +202,152 @@ impl PdfView {
         let mut highlight_overlays = Vec::new();
 
         for (index, page) in doc.pages().iter().enumerate() {
-            if let Some((picture, overlay, highlight)) = self.render_single_page(&page, index) {
-                self.append(&overlay);
-                page_pictures.push(picture);
-                page_overlays.push(overlay);
-                highlight_overlays.push(highlight);
-            }
+            let (width, height) = self.calculate_page_size(&page);
+
+            // Create placeholder picture
+            let picture = self.create_placeholder(width, height);
+
+            // Create highlight overlay with correct size
+            let highlight = HighlightOverlay::new();
+            highlight.set_content_width(width);
+            highlight.set_content_height(height);
+
+            // Wrap in overlay
+            let overlay = Overlay::new();
+            overlay.set_child(Some(&picture));
+            overlay.add_overlay(&highlight);
+
+            self.setup_page_gesture(&picture, index);
+            self.append(&overlay);
+
+            page_pictures.push(picture);
+            page_overlays.push(overlay);
+            highlight_overlays.push(highlight);
         }
 
         self.imp().page_pictures.replace(page_pictures);
         self.imp().page_overlays.replace(page_overlays);
         self.imp().highlight_overlays.replace(highlight_overlays);
+        self.imp().rendered_pages.borrow_mut().clear();
+
+        drop(doc_borrow);
+
+        // Render visible pages immediately
+        self.render_visible_pages();
     }
 
-    fn render_single_page(
+    /// Render only the pages that are currently visible (plus a small buffer)
+    pub fn render_visible_pages(&self) {
+        let visible_range = match self.get_visible_page_range() {
+            Some(range) => range,
+            None => return,
+        };
+
+        let doc_borrow = self.imp().document.borrow();
+        let doc = match doc_borrow.as_ref() {
+            Some(d) => d,
+            None => return,
+        };
+
+        let mut rendered = self.imp().rendered_pages.borrow_mut();
+        let page_pictures = self.imp().page_pictures.borrow();
+        let page_overlays = self.imp().page_overlays.borrow();
+        let highlight_overlays = self.imp().highlight_overlays.borrow();
+
+        // Render pages in visible range that haven't been rendered yet
+        for page_index in visible_range {
+            if rendered.contains(&page_index) {
+                continue; // Already rendered
+            }
+
+            if let Ok(page) = doc.pages().get(page_index as u16) {
+                if let Some(picture) = page_pictures.get(page_index) {
+                    if let Some(overlay) = page_overlays.get(page_index) {
+                        if let Some(highlight) = highlight_overlays.get(page_index) {
+                            // Render the page
+                            self.render_page_content(
+                                &page, page_index, picture, overlay, highlight,
+                            );
+                            rendered.insert(page_index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get the range of pages currently visible (with buffer)
+    fn get_visible_page_range(&self) -> Option<std::ops::RangeInclusive<usize>> {
+        let scrolled = self.find_scrolled_window()?;
+        let adjustment = scrolled.vadjustment();
+        let scroll_y = adjustment.value();
+        let viewport_height = adjustment.page_size();
+
+        let page_pictures = self.imp().page_pictures.borrow();
+        if page_pictures.is_empty() {
+            return None;
+        }
+
+        let spacing = 10.0;
+        let mut first_visible: Option<usize> = None;
+        let mut last_visible: Option<usize> = None;
+
+        for (index, picture) in page_pictures.iter().enumerate() {
+            let nat_size = picture.preferred_size().1;
+            let picture_height = nat_size.height() as f64;
+
+            let page_top = index as f64 * (picture_height + spacing);
+            let page_bottom = page_top + picture_height;
+
+            // Check if page intersects with viewport
+            if page_bottom > scroll_y && page_top < scroll_y + viewport_height {
+                if first_visible.is_none() {
+                    first_visible = Some(index);
+                }
+                last_visible = Some(index);
+            }
+        }
+
+        let first = first_visible.unwrap_or(0);
+        let last = last_visible.unwrap_or(0);
+
+        // Add buffer of 1 page on each side
+        let buffer = 1;
+        let start = first.saturating_sub(buffer);
+        let end = (last + buffer).min(page_pictures.len() - 1);
+
+        Some(start..=end)
+    }
+
+    /// Render actual content for a specific page
+    fn render_page_content(
         &self,
         page: &PdfPage,
         page_index: usize,
-    ) -> Option<(Picture, Overlay, HighlightOverlay)> {
-        let config = create_render_config();
-        let bitmap = page.render_with_config(&config).ok()?;
+        picture: &Picture,
+        _overlay: &Overlay,
+        highlight: &HighlightOverlay,
+    ) {
+        let zoom = self.imp().zoom_level.get();
+        let config = create_render_config_with_zoom(zoom);
+
+        let bitmap = match page.render_with_config(&config) {
+            Ok(b) => b,
+            Err(_) => return,
+        };
 
         let dimensions = calculate_page_dimensions(&bitmap);
         let texture = self.create_texture_from_bitmap(&bitmap, &dimensions);
 
-        let picture = Picture::builder()
-            .can_shrink(false)
-            .paintable(&texture)
-            .build();
+        // Update the picture's paintable and remove placeholder styling
+        picture.set_paintable(Some(&texture));
+        picture.remove_css_class("pdf-placeholder");
 
-        // Create highlight overlay with same size as the rendered image
-        let highlight = HighlightOverlay::new();
+        // Update highlight overlay size (in case it changed)
         highlight.set_content_width(dimensions.width);
         highlight.set_content_height(dimensions.height);
 
-        // Wrap picture and highlight in an Overlay
-        let overlay = Overlay::new();
-        overlay.set_child(Some(&picture));
-        overlay.add_overlay(&highlight);
-
-        self.setup_page_gesture(&picture, page_index);
-
-        Some((picture, overlay, highlight))
+        println!("Rendered page {}", page_index);
     }
 
     fn create_texture_from_bitmap(
@@ -251,7 +410,8 @@ impl PdfView {
         };
 
         let offset = calculate_picture_offset(picture);
-        let click = calculate_click_coordinates_with_offset(x, y, &page, offset);
+        let zoom = self.zoom_level();
+        let click = calculate_click_coordinates_with_offset(x, y, &page, offset, zoom);
 
         self.process_definition_click(&page, &click, picture);
     }
@@ -304,7 +464,8 @@ impl PdfView {
         };
 
         let offset = calculate_picture_offset(picture);
-        let click = calculate_click_coordinates_with_offset(x, y, &page, offset);
+        let zoom = self.zoom_level();
+        let click = calculate_click_coordinates_with_offset(x, y, &page, offset, zoom);
 
         let text_page = match page.text() {
             Ok(tp) => tp,
@@ -461,6 +622,8 @@ impl PdfView {
             if let Some(view) = view_weak.upgrade() {
                 view.imp().pending_update.set(false);
                 view.update_current_page();
+                // Render any newly visible pages after scrolling
+                view.render_visible_pages();
             }
         });
     }
@@ -573,6 +736,60 @@ impl PdfView {
     /// Check if there's a popover currently open
     pub fn has_popover(&self) -> bool {
         self.imp().current_popover.borrow().is_some()
+    }
+
+    /// Get the current zoom level
+    pub fn zoom_level(&self) -> f64 {
+        self.imp().zoom_level.get()
+    }
+
+    /// Set the zoom level and update page sizes
+    pub fn set_zoom_level(&self, zoom: f64) {
+        let clamped_zoom = zoom.clamp(0.5, 3.0);
+        self.imp().zoom_level.set(clamped_zoom);
+        self.update_page_sizes_for_zoom();
+    }
+
+    /// Update all page sizes for the new zoom level (fast - no rendering)
+    /// Then render only visible pages
+    fn update_page_sizes_for_zoom(&self) {
+        let doc_borrow = self.imp().document.borrow();
+        let doc = match doc_borrow.as_ref() {
+            Some(d) => d,
+            None => return,
+        };
+
+        let page_pictures = self.imp().page_pictures.borrow();
+        let highlight_overlays = self.imp().highlight_overlays.borrow();
+
+        // Update sizes for all pages (fast - just size request changes)
+        for (index, page) in doc.pages().iter().enumerate() {
+            let (width, height) = self.calculate_page_size(&page);
+
+            if let Some(picture) = page_pictures.get(index) {
+                // Just update size request - no pixel allocation
+                picture.set_width_request(width);
+                picture.set_height_request(height);
+                // Clear any existing paintable so it shows as placeholder
+                picture.set_paintable(gtk::gdk::Paintable::NONE);
+                picture.add_css_class("pdf-placeholder");
+            }
+
+            if let Some(highlight) = highlight_overlays.get(index) {
+                highlight.set_content_width(width);
+                highlight.set_content_height(height);
+            }
+        }
+
+        // Mark all pages as needing re-render
+        self.imp().rendered_pages.borrow_mut().clear();
+
+        drop(doc_borrow);
+        drop(page_pictures);
+        drop(highlight_overlays);
+
+        // Render only visible pages
+        self.render_visible_pages();
     }
 }
 

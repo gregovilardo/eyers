@@ -32,10 +32,28 @@ pub enum KeyAction {
     StartFindBackward,
     /// Copy text to clipboard (start and end cursor for range, or same cursor for single word)
     CopyToClipboard { start: WordCursor, end: WordCursor },
+    /// Scroll to start of document (gg in vim)
+    ScrollToStart,
+    /// Scroll to end of document (G in vim)
+    ScrollToEnd,
+    /// First 'g' pressed, waiting for second 'g'
+    PendingG,
+    /// Zoom in (+)
+    ZoomIn,
+    /// Zoom out (-)
+    ZoomOut,
 }
 
 /// Handle a key press in Normal mode
-pub fn handle_normal_mode_key(keyval: gdk::Key) -> KeyAction {
+pub fn handle_normal_mode_key(keyval: gdk::Key, pending_g: bool) -> KeyAction {
+    // If 'g' was previously pressed, check for 'gg' sequence
+    if pending_g {
+        return match keyval {
+            gdk::Key::g => KeyAction::ScrollToStart,
+            _ => KeyAction::None, // Any other key cancels the pending 'g'
+        };
+    }
+
     match keyval {
         // Navigation - scroll viewport by 10%
         gdk::Key::h | gdk::Key::Left => KeyAction::Scroll {
@@ -56,6 +74,14 @@ pub fn handle_normal_mode_key(keyval: gdk::Key) -> KeyAction {
         },
         // Enter visual mode
         gdk::Key::v => KeyAction::EnterVisual,
+        // First 'g' pressed - wait for second 'g'
+        gdk::Key::g => KeyAction::PendingG,
+        // 'G' (shift+g) - go to end of document
+        gdk::Key::G => KeyAction::ScrollToEnd,
+        // Zoom in
+        gdk::Key::plus | gdk::Key::equal => KeyAction::ZoomIn,
+        // Zoom out
+        gdk::Key::minus => KeyAction::ZoomOut,
         // Note: 'o' for OpenFile is handled directly in handle_mode_key before document check
         _ => KeyAction::None,
     }
@@ -67,6 +93,7 @@ pub fn handle_visual_mode_key(
     mode: &AppMode,
     cache: &mut TextMapCache,
     document: &PdfDocument,
+    pending_g: bool,
 ) -> KeyAction {
     let (cursor, has_selection) = match mode {
         AppMode::Visual {
@@ -75,6 +102,14 @@ pub fn handle_visual_mode_key(
         } => (*cursor, selection_anchor.is_some()),
         AppMode::Normal => return KeyAction::None,
     };
+
+    // If 'g' was previously pressed, check for 'gg' sequence
+    if pending_g {
+        return match keyval {
+            gdk::Key::g => KeyAction::ScrollToStart,
+            _ => KeyAction::None, // Any other key cancels the pending 'g'
+        };
+    }
 
     match keyval {
         // Navigation - move cursor
@@ -196,6 +231,18 @@ pub fn handle_visual_mode_key(
                 }
             }
         }
+
+        // First 'g' pressed - wait for second 'g'
+        gdk::Key::g => KeyAction::PendingG,
+
+        // 'G' (shift+g) - go to end of document
+        gdk::Key::G => KeyAction::ScrollToEnd,
+
+        // Zoom in
+        gdk::Key::plus | gdk::Key::equal => KeyAction::ZoomIn,
+
+        // Zoom out
+        gdk::Key::minus => KeyAction::ZoomOut,
 
         _ => KeyAction::None,
     }

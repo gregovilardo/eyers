@@ -5,6 +5,11 @@ use pdfium_render::prelude::*;
 pub const RENDER_WIDTH: i32 = 1000;
 const CLICK_TOLERANCE: f64 = 5.0;
 
+/// Get the effective render width for a given zoom level
+pub fn get_render_width_for_zoom(zoom: f64) -> i32 {
+    (RENDER_WIDTH as f64 * zoom) as i32
+}
+
 /// Data extracted from a click event on a PDF page
 pub struct ClickData {
     pub pdf_x: f64,
@@ -43,10 +48,12 @@ pub fn calculate_click_coordinates_with_offset(
     y: f64,
     page: &PdfPage,
     picture_offset: f64,
+    zoom_level: f64,
 ) -> ClickData {
     let page_width_pts = page.width().value as f64;
     let page_height_pts = page.height().value as f64;
-    let scale = RENDER_WIDTH as f64 / page_width_pts;
+    let render_width = get_render_width_for_zoom(zoom_level);
+    let scale = render_width as f64 / page_width_pts;
 
     let adjusted_x = x - picture_offset;
 
@@ -127,8 +134,10 @@ pub fn calculate_page_dimensions(bitmap: &PdfBitmap) -> PageRenderConfig {
     }
 }
 
-pub fn create_render_config() -> PdfRenderConfig {
+/// Create a render config with a specific zoom level
+pub fn create_render_config_with_zoom(zoom: f64) -> PdfRenderConfig {
+    let width = get_render_width_for_zoom(zoom);
     PdfRenderConfig::new()
-        .set_target_width(RENDER_WIDTH)
+        .set_target_width(width)
         .set_format(PdfBitmapFormat::BGRA)
 }

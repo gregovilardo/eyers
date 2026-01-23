@@ -53,3 +53,8 @@
     font-size: 0.95em;
     color: #ffffff;
 }
+
+/* PDF page placeholder (unrendered pages) */
+.pdf-placeholder {
+    background-color: #e0e0e0;
+}

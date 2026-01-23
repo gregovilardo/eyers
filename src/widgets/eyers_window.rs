@@ -8,10 +8,10 @@ use std::cell::{Cell, RefCell};
 use std::path::Path;
 
 use crate::modes::{
-    handle_normal_mode_key, handle_visual_mode_key, AppMode, KeyAction, WordCursor,
+    AppMode, KeyAction, WordCursor, handle_normal_mode_key, handle_visual_mode_key,
 };
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
+use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::{EyersHeaderBar, HighlightRect, PdfView, TocPanel, TranslationPanel};
 
 mod imp {
@@ -633,6 +633,8 @@ impl EyersWindow {
         let doc = doc_borrow.as_ref()?;
 
         let mut cache = imp.text_cache.borrow_mut();
+        println!("first word {:#?}", cache);
+
         let cache = cache.as_mut()?;
 
         if let Some(text_map) = cache.get_or_build(page_index, doc) {
@@ -819,7 +821,7 @@ impl EyersWindow {
         let doc_borrow = imp.pdf_view.document();
         let doc = doc_borrow.as_ref()?;
 
-        let mut cache = imp.text_cache.borrow_mut();
+        let mut cache = imp.text_cache.try_borrow_mut().ok()?;
         let cache = cache.as_mut()?;
 
         // Find which page is at the top of the viewport

@@ -161,12 +161,7 @@ impl PageTextMap {
         // Sort words by y-center (descending, since PDF y=0 is at bottom)
         // This gives us top-to-bottom order
         let mut word_indices: Vec<usize> = (0..words.len()).collect();
-        word_indices.sort_by(|&a, &b| {
-            words[b]
-                .center_y
-                .partial_cmp(&words[a].center_y)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        word_indices.sort_by(|&a, &b| words[b].center_y.total_cmp(&words[a].center_y));
 
         // Group into lines
         let mut lines: Vec<LineInfo> = Vec::new();
@@ -185,12 +180,8 @@ impl PageTextMap {
                     // New line - save previous if exists
                     if !current_line_indices.is_empty() {
                         // Sort words in line by x (left to right)
-                        current_line_indices.sort_by(|&a, &b| {
-                            words[a]
-                                .center_x
-                                .partial_cmp(&words[b].center_x)
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        });
+                        current_line_indices
+                            .sort_by(|&a, &b| words[a].center_x.total_cmp(&words[b].center_x));
 
                         let line_y_avg = current_line_indices
                             .iter()
@@ -237,20 +228,14 @@ impl PageTextMap {
         // Create a list of (original_index, word) pairs sorted by reading order
         let mut indexed_words: Vec<(usize, &WordInfo)> = words.iter().enumerate().collect();
 
-        // Sort by y descending (top first), then x ascending (left first)
         indexed_words.sort_by(|(_, a), (_, b)| {
-            let y_diff = (a.center_y - b.center_y).abs();
-            if y_diff <= threshold {
-                // Same line - sort by x
-                a.center_x
-                    .partial_cmp(&b.center_x)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            } else {
-                // Different lines - sort by y descending
-                b.center_y
-                    .partial_cmp(&a.center_y)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            }
+            // Discretize y into line buckets so its a total order and sort don't panic
+            let line_a = (a.center_y / threshold).floor() as i64;
+            let line_b = (b.center_y / threshold).floor() as i64;
+
+            line_b
+                .cmp(&line_a) // descending by line
+                .then_with(|| a.center_x.total_cmp(&b.center_x)) // then ascending by x
         });
 
         // Build reordering map: new_index -> old_index

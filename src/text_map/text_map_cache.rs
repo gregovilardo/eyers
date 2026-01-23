@@ -5,6 +5,7 @@ use pdfium_render::prelude::*;
 use crate::text_map::page_text_map::PageTextMap;
 
 /// Lazy cache for PageTextMap instances across a PDF document
+#[derive(Debug)]
 pub struct TextMapCache {
     /// Cached text maps by page index
     maps: HashMap<usize, PageTextMap>,

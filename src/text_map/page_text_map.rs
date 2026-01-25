@@ -143,7 +143,13 @@ impl PageTextMap {
         Some(WordInfo::new(text, char_start, char_end, bounds, 0))
     }
 
-    /// Group words into lines based on y-coordinate proximity
+    /// Group words into lines based on y-coordinate proximity and reorder into reading order.
+    ///
+    /// Strategy:
+    /// 1. Sort words by y-center descending (top-to-bottom)
+    /// 2. Cluster into lines using threshold - assign each word a line_index
+    /// 3. Sort by (line_index, center_x) - this is a proper total order (transitive)
+    /// 4. Reorder words array and build LineInfo with correct word ranges
     fn group_into_lines(words: &mut [WordInfo]) -> Vec<LineInfo> {
         if words.is_empty() {
             return Vec::new();
@@ -158,127 +164,82 @@ impl PageTextMap {
 
         let threshold = avg_height * LINE_GROUPING_THRESHOLD;
 
-        // Sort words by y-center (descending, since PDF y=0 is at bottom)
-        // This gives us top-to-bottom order
+        // Step 1: Sort word indices by y-center descending (top first in PDF coords)
         let mut word_indices: Vec<usize> = (0..words.len()).collect();
         word_indices.sort_by(|&a, &b| words[b].center_y.total_cmp(&words[a].center_y));
 
-        // Group into lines
-        let mut lines: Vec<LineInfo> = Vec::new();
-        let mut current_line_indices: Vec<usize> = Vec::new();
+        // Step 2: Cluster into lines and assign line_index to each word
+        // Also track line y-centers for LineInfo
+        let mut line_y_centers: Vec<f64> = Vec::new();
         let mut current_line_y: Option<f64> = None;
+        let mut current_line_idx: usize = 0;
 
         for &word_idx in &word_indices {
             let word_y = words[word_idx].center_y;
 
             match current_line_y {
                 Some(line_y) if (word_y - line_y).abs() <= threshold => {
-                    // Same line
-                    current_line_indices.push(word_idx);
-                }
-                _ => {
-                    // New line - save previous if exists
-                    if !current_line_indices.is_empty() {
-                        // Sort words in line by x (left to right)
-                        current_line_indices
-                            .sort_by(|&a, &b| words[a].center_x.total_cmp(&words[b].center_x));
-
-                        let line_y_avg = current_line_indices
-                            .iter()
-                            .map(|&i| words[i].center_y)
-                            .sum::<f64>()
-                            / current_line_indices.len() as f64;
-
-                        lines.push(LineInfo::new(0, 0, line_y_avg)); // word ranges set later
-                    }
-
-                    current_line_indices = vec![word_idx];
-                    current_line_y = Some(word_y);
-                }
-            }
-        }
-
-        // Don't forget the last line
-        if !current_line_indices.is_empty() {
-            let line_y_avg = current_line_indices
-                .iter()
-                .map(|&i| words[i].center_y)
-                .sum::<f64>()
-                / current_line_indices.len() as f64;
-
-            lines.push(LineInfo::new(0, 0, line_y_avg));
-        }
-
-        // Now reorder words into reading order and assign line indices
-        Self::reorder_words_by_reading_order(words, &mut lines, &word_indices, threshold)
-    }
-
-    /// Reorder words vec into reading order (top-to-bottom, left-to-right)
-    /// and set line indices on each word
-    fn reorder_words_by_reading_order(
-        words: &mut [WordInfo],
-        _lines: &mut Vec<LineInfo>,
-        _word_indices: &[usize],
-        threshold: f64,
-    ) -> Vec<LineInfo> {
-        if words.is_empty() {
-            return Vec::new();
-        }
-
-        // Create a list of (original_index, word) pairs sorted by reading order
-        let mut indexed_words: Vec<(usize, &WordInfo)> = words.iter().enumerate().collect();
-
-        indexed_words.sort_by(|(_, a), (_, b)| {
-            // Discretize y into line buckets so its a total order and sort don't panic
-            let line_a = (a.center_y / threshold).floor() as i64;
-            let line_b = (b.center_y / threshold).floor() as i64;
-
-            line_b
-                .cmp(&line_a) // descending by line
-                .then_with(|| a.center_x.total_cmp(&b.center_x)) // then ascending by x
-        });
-
-        // Build reordering map: new_index -> old_index
-        let reorder_map: Vec<usize> = indexed_words.iter().map(|(old_idx, _)| *old_idx).collect();
-
-        // Create reordered words
-        let mut reordered: Vec<WordInfo> = reorder_map
-            .iter()
-            .map(|&old_idx| words[old_idx].clone())
-            .collect();
-
-        // Now group into lines and assign line_index
-        let mut final_lines: Vec<LineInfo> = Vec::new();
-        let mut current_line_start: usize = 0;
-        let mut current_line_y: Option<f64> = None;
-
-        for (new_idx, word) in reordered.iter_mut().enumerate() {
-            match current_line_y {
-                Some(line_y) if (word.center_y - line_y).abs() <= threshold => {
-                    // Same line
-                    word.line_index = final_lines.len();
+                    // Same line - assign current line index
+                    words[word_idx].line_index = current_line_idx;
                 }
                 _ => {
                     // New line
-                    if let Some(prev_y) = current_line_y {
-                        final_lines.push(LineInfo::new(current_line_start, new_idx, prev_y));
+                    if current_line_y.is_some() {
+                        current_line_idx += 1;
                     }
-                    current_line_start = new_idx;
-                    current_line_y = Some(word.center_y);
-                    word.line_index = final_lines.len();
+                    line_y_centers.push(word_y);
+                    current_line_y = Some(word_y);
+                    words[word_idx].line_index = current_line_idx;
                 }
             }
         }
 
-        // Last line
-        if let Some(line_y) = current_line_y {
-            final_lines.push(LineInfo::new(current_line_start, reordered.len(), line_y));
-        }
+        // Step 3: Sort by (line_index, center_x) - proper total order, no transitivity issues
+        word_indices.sort_by(|&a, &b| {
+            let line_cmp = words[a].line_index.cmp(&words[b].line_index);
+            if line_cmp != std::cmp::Ordering::Equal {
+                line_cmp
+            } else {
+                words[a].center_x.total_cmp(&words[b].center_x)
+            }
+        });
 
-        // Copy reordered words back
+        // Step 4: Reorder words array according to sorted indices
+        let reordered: Vec<WordInfo> = word_indices
+            .iter()
+            .map(|&old_idx| words[old_idx].clone())
+            .collect();
         words.clone_from_slice(&reordered);
 
-        final_lines
+        // Step 5: Build LineInfo with correct word ranges
+        let mut lines: Vec<LineInfo> = Vec::new();
+        let mut current_line_start: usize = 0;
+        let mut prev_line_index: Option<usize> = None;
+
+        for (new_idx, word) in words.iter().enumerate() {
+            match prev_line_index {
+                Some(prev_idx) if word.line_index == prev_idx => {
+                    // Same line, continue
+                }
+                _ => {
+                    // New line - finalize previous
+                    if let Some(prev_idx) = prev_line_index {
+                        let line_y = line_y_centers.get(prev_idx).copied().unwrap_or(0.0);
+                        lines.push(LineInfo::new(current_line_start, new_idx, line_y));
+                    }
+                    current_line_start = new_idx;
+                    prev_line_index = Some(word.line_index);
+                }
+            }
+        }
+
+        // Finalize last line
+        if let Some(prev_idx) = prev_line_index {
+            let line_y = line_y_centers.get(prev_idx).copied().unwrap_or(0.0);
+            lines.push(LineInfo::new(current_line_start, words.len(), line_y));
+        }
+
+        lines
     }
 
     /// Check if a character should be part of a word

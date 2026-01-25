@@ -113,7 +113,9 @@ impl DefinitionPopover {
 
         std::thread::spawn(move || {
             let definition = dictionary::fetch_definition(&lookup_word, &original_word)
-                .unwrap_or_else(|| "Definition not found.".to_string());
+                .unwrap_or_else(|| {
+                    format!("Definition for <b>{lookup_word}</b> not found.").to_string()
+                });
             let _ = sender.send(definition);
         });
 

@@ -1,5 +1,6 @@
 use gtk::gio;
 use gtk::glib;
+use gtk::glib::closure_local;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{ApplicationWindow, Box, Orientation, Paned, PolicyType, ScrolledWindow};
@@ -108,6 +109,7 @@ impl EyersWindow {
     fn init_pdfium(&self) {
         let bindings = Pdfium::bind_to_library(Path::new("/usr/bin/libpdfium.so"))
             .expect("Failed to bind to PDFium");
+
         let pdfium: &'static Pdfium =
             std::boxed::Box::leak(std::boxed::Box::new(Pdfium::new(bindings)));
 
@@ -176,6 +178,7 @@ impl EyersWindow {
         self.setup_toc_panel();
         self.setup_keyboard_controller();
         self.setup_scroll_tracking();
+        self.setup_page_indicator_label();
     }
 
     fn setup_toast(&self) {
@@ -1485,9 +1488,21 @@ impl EyersWindow {
             *mode = AppMode::exit_to_normal();
         }
         self.update_mode_display();
-        self.imp().pdf_view.set_cursor(None);
-        self.imp().pdf_view.clear_selection();
-        self.imp().pdf_view.clear_all_highlights();
+        self.pdf_view().set_cursor(None);
+        self.pdf_view().clear_selection();
+        self.pdf_view().clear_all_highlights();
+    }
+
+    fn setup_page_indicator_label(&self) {
+        let header_bar = self.header_bar().clone();
+        self.pdf_view().connect_closure(
+            "current-page-updated",
+            false,
+            closure_local!(|_pdf_view: &PdfView, current_page: u32, all_pages: u32| {
+                let page_indicator_text = format!("[{current_page}/{all_pages}]");
+                header_bar.set_pages_indicator_text(&page_indicator_text);
+            }),
+        );
     }
 
     /// Initialize the text cache for the loaded document

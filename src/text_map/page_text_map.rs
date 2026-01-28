@@ -23,6 +23,7 @@ impl PageTextMap {
     /// Build a PageTextMap by extracting all words from a PDF page
     pub fn build_from_page(page: &PdfPage, page_index: usize) -> Option<Self> {
         let text_page = page.text().ok()?;
+        println!("page.text() {}", text_page);
         let page_width = page.width().value as f64;
         let page_height = page.height().value as f64;
 
@@ -33,6 +34,7 @@ impl PageTextMap {
         for char_obj in chars.iter() {
             if let (Some(unicode), Ok(bounds)) = (char_obj.unicode_char(), char_obj.tight_bounds())
             {
+                println!("Carácter: '{}', Código: U+{:X}", unicode, unicode as u32);
                 char_data.push(CharData {
                     char: unicode,
                     index: char_obj.index() as usize,
@@ -82,25 +84,15 @@ impl PageTextMap {
         let mut current_word_chars: Vec<&CharData> = Vec::new();
 
         for char_info in char_data {
-            if char_info.char.is_whitespace() {
-                // End current word if any
-                if !current_word_chars.is_empty() {
-                    if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
-                        words.push(word);
-                    }
-                    current_word_chars.clear();
-                }
-            } else if Self::is_word_char(char_info.char) {
+            if Self::is_word_char(char_info.char) {
                 current_word_chars.push(char_info);
             } else {
-                // Non-word character (punctuation, etc.) - end current word
                 if !current_word_chars.is_empty() {
                     if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
                         words.push(word);
                     }
                     current_word_chars.clear();
                 }
-                // Optionally include standalone punctuation as "words" if needed
             }
         }
 
@@ -244,7 +236,7 @@ impl PageTextMap {
 
     /// Check if a character should be part of a word
     fn is_word_char(c: char) -> bool {
-        c.is_alphanumeric() || c == '\'' || c == '-'
+        (!c.is_whitespace() && c.is_alphanumeric()) || c == '\'' || c == '-'
     }
 
     /// Get the word at a specific index
@@ -304,6 +296,7 @@ impl PageTextMap {
 }
 
 /// Internal struct for character extraction
+#[derive(Debug)]
 struct CharData {
     char: char,
     index: usize,
@@ -314,6 +307,7 @@ struct CharData {
 mod tests {
     use super::*;
 
+    // super IA este test la puta madre
     #[test]
     fn test_is_word_char() {
         assert!(PageTextMap::is_word_char('a'));

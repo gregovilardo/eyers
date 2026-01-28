@@ -1,5 +1,5 @@
-use glib::subclass::Signal;
 use glib::Properties;
+use glib::subclass::Signal;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -47,6 +47,7 @@ mod imp {
         pub(super) rendered_pages: RefCell<HashSet<usize>>,
         pub selection_start: RefCell<Option<SelectionPoint>>,
         pub current_page: Cell<u16>,
+        pub all_pages: Cell<u16>,
         pub pending_update: Cell<bool>,
         pub visual_cursor: RefCell<Option<WordCursor>>,
         pub visual_selection: RefCell<Option<(WordCursor, WordCursor)>>,
@@ -71,6 +72,7 @@ mod imp {
                 rendered_pages: RefCell::new(HashSet::new()),
                 selection_start: RefCell::new(None),
                 current_page: Cell::new(0),
+                all_pages: Cell::new(0),
                 pending_update: Cell::new(false),
                 visual_cursor: RefCell::new(None),
                 visual_selection: RefCell::new(None),
@@ -98,9 +100,14 @@ mod imp {
         fn signals() -> &'static [Signal] {
             static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
             SIGNALS.get_or_init(|| {
-                vec![Signal::builder("translate-requested")
-                    .param_types([String::static_type()])
-                    .build()]
+                vec![
+                    Signal::builder("translate-requested")
+                        .param_types([String::static_type()])
+                        .build(),
+                    Signal::builder("current-page-updated")
+                        .param_types([u32::static_type(), u32::static_type()])
+                        .build(),
+                ]
             })
         }
     }
@@ -144,6 +151,8 @@ impl PdfView {
         let document = pdfium
             .load_pdf_from_file(&path, None)
             .map_err(|e| format!("Failed to open PDF: {}", e))?;
+
+        self.set_all_pages(document.pages().len());
 
         let entries = bookmarks::extract_bookmarks(&document);
         self.imp().bookmarks.replace(Some(entries));
@@ -592,6 +601,14 @@ impl PdfView {
         self.imp().current_page.get()
     }
 
+    pub fn all_pages(&self) -> u16 {
+        self.imp().all_pages.get()
+    }
+
+    pub fn set_all_pages(&self, pages: u16) {
+        self.imp().all_pages.set(pages);
+    }
+
     fn setup_scroll_tracking(&self) {
         let view_weak = self.downgrade();
 
@@ -631,6 +648,10 @@ impl PdfView {
     fn update_current_page(&self) {
         if let Some(page_index) = self.calculate_current_page_from_scroll() {
             self.imp().current_page.set(page_index);
+            self.emit_by_name::<()>(
+                "current-page-updated",
+                &[&(page_index as u32), &(self.all_pages() as u32)],
+            )
         }
     }
 

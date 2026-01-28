@@ -16,6 +16,7 @@ mod imp {
         pub definitions_toggle: ToggleButton,
         pub translate_toggle: ToggleButton,
         pub mode_label: Label,
+        pub pages_indicator_label: Label,
 
         #[property(get, set, default = false)]
         pub definitions_enabled: Cell<bool>,
@@ -56,6 +57,10 @@ impl EyersHeaderBar {
         imp.mode_label.set_label("NORMAL");
         imp.mode_label.add_css_class("mode-label");
         imp.header_bar.pack_start(&imp.mode_label);
+
+        imp.pages_indicator_label
+            .add_css_class("pages-indicator-label");
+        imp.header_bar.pack_start(&imp.pages_indicator_label);
 
         // Configure the header bar
         imp.header_bar
@@ -134,9 +139,12 @@ impl EyersHeaderBar {
         &self.imp().mode_label
     }
 
-    /// Update the mode label text
     pub fn set_mode_text(&self, mode: &str) {
         self.imp().mode_label.set_label(mode);
+    }
+
+    pub fn set_pages_indicator_text(&self, text: &str) {
+        self.imp().pages_indicator_label.set_label(text);
     }
 }
 

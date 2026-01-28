@@ -267,17 +267,14 @@ impl EyersWindow {
 
         controller.connect_key_pressed(move |_, key, _, modifiers| {
             if let Some(window) = window_weak.upgrade() {
-                println!("previous keyaction: {:?}", window.keyaction_state());
                 let imp = window.imp();
-
                 let toc_visible = imp.toc_panel.is_visible();
-                let action = handle_pre_global_key(key, modifiers, toc_visible);
-                if action != KeyAction::Empty {
+
+                if let Some(action) = handle_pre_global_key(key, modifiers, toc_visible) {
                     window.set_keyaction_state(action);
-                }
-                println!("after pregloabl  keyaction: {:?}", window.keyaction_state());
-                if window.execute_key_action(action) {
-                    return glib::Propagation::Stop;
+                    if window.execute_key_action(action) {
+                        return glib::Propagation::Stop;
+                    }
                 }
 
                 // Handle mode-based key events
@@ -285,18 +282,11 @@ impl EyersWindow {
                     return glib::Propagation::Stop;
                 }
 
-                println!(
-                    "after handle_mode keyaction: {:?}",
-                    window.keyaction_state()
-                );
-                let action = handle_post_global_key(key);
-                if action != KeyAction::Empty {
+                if let Some(action) = handle_post_global_key(key) {
                     window.set_keyaction_state(action);
-                }
-
-                println!("after post keyaction: {:?}", window.keyaction_state());
-                if window.execute_key_action(action) {
-                    return glib::Propagation::Stop;
+                    if window.execute_key_action(action) {
+                        return glib::Propagation::Stop;
+                    }
                 }
             }
             glib::Propagation::Proceed
@@ -318,7 +308,7 @@ impl EyersWindow {
 
         let keyaction_state = self.keyaction_state();
 
-        let action = match &mode {
+        if let Some(action) = match &mode {
             AppMode::Normal => handle_normal_mode_key(key, keyaction_state),
             AppMode::Visual { .. } => {
                 let doc_borrow = imp.pdf_view.document();
@@ -327,17 +317,17 @@ impl EyersWindow {
                     if let Some(ref mut cache) = *cache {
                         handle_visual_mode_key(key, &mode, cache, doc, keyaction_state)
                     } else {
-                        return false;
+                        None
                     }
                 } else {
-                    return false;
+                    None
                 }
             }
-        };
-        if action != KeyAction::Empty {
+        } {
             self.set_keyaction_state(action);
-        }
-        self.execute_key_action(action)
+            return self.execute_key_action(action);
+        };
+        false
     }
 
     /// Execute a key action

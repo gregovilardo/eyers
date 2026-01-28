@@ -31,8 +31,6 @@ mod imp {
         pub paned: RefCell<Option<Paned>>,
         pub app_mode: RefCell<AppMode>,
         pub text_cache: RefCell<Option<TextMapCache>>,
-        /// Pending find direction: Some(true) = forward, Some(false) = backward
-        pub pending_find: RefCell<Option<bool>>,
         /// Toast revealer for copy feedback
         pub toast_revealer: gtk::Revealer,
         /// Toast label for displaying message
@@ -61,10 +59,9 @@ mod imp {
                 paned: RefCell::new(None),
                 app_mode: RefCell::new(AppMode::default()),
                 text_cache: RefCell::new(None),
-                pending_find: RefCell::new(None),
                 toast_revealer,
                 toast_label,
-                keyaction_state: Cell::new(KeyAction::None),
+                keyaction_state: Cell::new(KeyAction::Empty),
             }
         }
     }
@@ -270,13 +267,15 @@ impl EyersWindow {
 
         controller.connect_key_pressed(move |_, key, _, modifiers| {
             if let Some(window) = window_weak.upgrade() {
+                println!("previous keyaction: {:?}", window.keyaction_state());
                 let imp = window.imp();
 
                 let toc_visible = imp.toc_panel.is_visible();
                 let action = handle_pre_global_key(key, modifiers, toc_visible);
-                if action != KeyAction::None {
+                if action != KeyAction::Empty {
                     window.set_keyaction_state(action);
                 }
+                println!("after pregloabl  keyaction: {:?}", window.keyaction_state());
                 if window.execute_key_action(action) {
                     return glib::Propagation::Stop;
                 }
@@ -286,10 +285,16 @@ impl EyersWindow {
                     return glib::Propagation::Stop;
                 }
 
+                println!(
+                    "after handle_mode keyaction: {:?}",
+                    window.keyaction_state()
+                );
                 let action = handle_post_global_key(key);
-                if action != KeyAction::None {
+                if action != KeyAction::Empty {
                     window.set_keyaction_state(action);
                 }
+
+                println!("after post keyaction: {:?}", window.keyaction_state());
                 if window.execute_key_action(action) {
                     return glib::Propagation::Stop;
                 }
@@ -303,15 +308,6 @@ impl EyersWindow {
     /// Handle key press based on current mode
     fn handle_mode_key(&self, key: gtk::gdk::Key) -> bool {
         let imp = self.imp();
-
-        // Check if we're waiting for a find target character (f/F was pressed)
-        if let Some(forward) = imp.pending_find.take() {
-            if let Some(ch) = key.to_unicode() {
-                return self.execute_find(ch, forward);
-            }
-            // Invalid key (not a character), just clear pending and do nothing
-            return false;
-        }
 
         // Need document to be loaded for other mode operations
         if !imp.pdf_view.has_document() {
@@ -338,7 +334,7 @@ impl EyersWindow {
                 }
             }
         };
-        if action != KeyAction::None {
+        if action != KeyAction::Empty {
             self.set_keyaction_state(action);
         }
         self.execute_key_action(action)
@@ -349,7 +345,7 @@ impl EyersWindow {
         let imp = self.imp();
 
         match action {
-            KeyAction::None => false,
+            KeyAction::Empty => false,
 
             KeyAction::ToggleTOC => {
                 self.toggle_toc_panel();
@@ -482,16 +478,6 @@ impl EyersWindow {
                 true
             }
 
-            KeyAction::StartFindForward => {
-                self.imp().pending_find.replace(Some(true));
-                true
-            }
-
-            KeyAction::StartFindBackward => {
-                self.imp().pending_find.replace(Some(false));
-                true
-            }
-
             KeyAction::CopyToClipboard { start, end } => {
                 self.copy_range_to_clipboard(start, end);
                 true
@@ -508,14 +494,15 @@ impl EyersWindow {
             }
 
             KeyAction::PendingG => true,
-            KeyAction::PendingF => true,
-            KeyAction::FindFoward => {
-                self.execute_find(ch, true);
+            KeyAction::PendingForward => true,
+            KeyAction::PendingBackward => true,
+            KeyAction::FindForward { letter } => {
+                self.execute_find(letter, true);
                 true
             }
 
-            KeyAction::FindBackward => {
-                self.execute_find(ch, false);
+            KeyAction::FindBackward { letter } => {
+                self.execute_find(letter, false);
                 true
             }
 

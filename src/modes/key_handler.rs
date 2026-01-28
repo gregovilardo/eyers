@@ -15,7 +15,7 @@ pub enum ScrollDir {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum KeyAction {
     /// No action needed
-    None,
+    Empty,
     OpenFile,
     ToggleHeaderBar,
     ScrollHalfPage(ScrollDir),
@@ -50,11 +50,6 @@ pub enum KeyAction {
         start: WordCursor,
         end: WordCursor,
     },
-    /// Start find forward (f key pressed, waiting for target char)
-    StartFindForward,
-    /// Start find backward (F key pressed, waiting for target char)
-    StartFindBackward,
-    /// Copy text to clipboard (start and end cursor for range, or same cursor for single word)
     CopyToClipboard {
         start: WordCursor,
         end: WordCursor,
@@ -65,10 +60,14 @@ pub enum KeyAction {
     ScrollToEnd,
     /// First 'g' pressed, waiting for second 'g'
     PendingG,
-    PendingFoward,
+    PendingForward,
     PendingBackward,
-    FindFoward,
-    FindBackward,
+    FindForward {
+        letter: char,
+    },
+    FindBackward {
+        letter: char,
+    },
     /// Zoom in (+)
     ZoomIn,
     /// Zoom out (-)
@@ -84,7 +83,7 @@ pub fn handle_pre_global_key(
         return match keyval {
             gtk::gdk::Key::d => KeyAction::ScrollHalfPage(ScrollDir::Down),
             gtk::gdk::Key::u => KeyAction::ScrollHalfPage(ScrollDir::Up),
-            _ => KeyAction::None,
+            _ => KeyAction::Empty,
         };
     }
 
@@ -95,7 +94,7 @@ pub fn handle_pre_global_key(
             if is_toc_visible {
                 KeyAction::ScrollTOC(ScrollDir::Down)
             } else {
-                KeyAction::None
+                KeyAction::Empty
             }
         }
 
@@ -103,7 +102,7 @@ pub fn handle_pre_global_key(
             if is_toc_visible {
                 KeyAction::ScrollTOC(ScrollDir::Up)
             } else {
-                KeyAction::None
+                KeyAction::Empty
             }
         }
         gdk::Key::Return => KeyAction::SelectChapter,
@@ -112,7 +111,7 @@ pub fn handle_pre_global_key(
         //     imp.toc_panel.set_visible(false);
         //     return glib::Propagation::Stop;
         // }
-        _ => KeyAction::None,
+        _ => KeyAction::Empty,
     }
 }
 
@@ -120,19 +119,19 @@ pub fn handle_post_global_key(keyval: gdk::Key) -> KeyAction {
     match keyval {
         gdk::Key::o => KeyAction::OpenFile,
         gdk::Key::b => KeyAction::ToggleHeaderBar,
-        _ => KeyAction::None,
+        _ => KeyAction::Empty,
     }
 }
 
 /// Handle a key press in Normal mode
-pub fn handle_normal_mode_key(keyval: gdk::Key, key_action: KeyAction) -> KeyAction {
+pub fn handle_normal_mode_key(keyval: gdk::Key, key_action: KeyAction) -> Option<KeyAction> {
     // If 'g' was previously pressed, check for 'gg' sequence
     println!("DEBUG: input key_action = {:?}", key_action);
     println!("DEBUG: input key_action = {:?}", KeyAction::PendingG);
     if matches!(key_action, KeyAction::PendingG) {
         return match keyval {
             gdk::Key::g => KeyAction::ScrollToStart,
-            _ => KeyAction::None, // Any other key cancels the pending 'g'
+            _ => KeyAction::Empty, // Any other key cancels the pending 'g'
         };
     }
 
@@ -164,8 +163,7 @@ pub fn handle_normal_mode_key(keyval: gdk::Key, key_action: KeyAction) -> KeyAct
         gdk::Key::plus | gdk::Key::equal => KeyAction::ZoomIn,
         // Zoom out
         gdk::Key::minus => KeyAction::ZoomOut,
-        // Note: 'o' for OpenFile is handled directly in handle_mode_key before document check
-        _ => KeyAction::None,
+        _ => None,
     }
 }
 
@@ -182,15 +180,29 @@ pub fn handle_visual_mode_key(
             cursor,
             selection_anchor,
         } => (*cursor, selection_anchor.is_some()),
-        AppMode::Normal => return KeyAction::None,
+        AppMode::Normal => return KeyAction::Empty,
     };
 
     // If 'g' was previously pressed, check for 'gg' sequence
     if matches!(key_action, KeyAction::PendingG) {
         return match keyval {
             gdk::Key::g => KeyAction::ScrollToStart,
-            _ => KeyAction::None, // Any other key cancels the pending 'g'
+            _ => KeyAction::Empty, // Any other key cancels the pending 'g'
         };
+    }
+
+    if matches!(key_action, KeyAction::PendingForward) {
+        if let Some(letter) = keyval.to_unicode() {
+            return KeyAction::FindForward { letter: letter };
+        }
+        return KeyAction::Empty;
+    }
+
+    if matches!(key_action, KeyAction::PendingBackward) {
+        if let Some(letter) = keyval.to_unicode() {
+            return KeyAction::FindBackward { letter: letter };
+        }
+        return KeyAction::Empty;
     }
 
     match keyval {
@@ -208,7 +220,7 @@ pub fn handle_visual_mode_key(
                     cursor: WordCursor::new(result.page_index, result.word_index),
                 }
             } else {
-                KeyAction::None
+                KeyAction::Empty
             }
         }
         gdk::Key::l | gdk::Key::Right => {
@@ -223,7 +235,7 @@ pub fn handle_visual_mode_key(
                     cursor: WordCursor::new(result.page_index, result.word_index),
                 }
             } else {
-                KeyAction::None
+                KeyAction::Empty
             }
         }
         gdk::Key::k | gdk::Key::Up => {
@@ -238,7 +250,7 @@ pub fn handle_visual_mode_key(
                     cursor: WordCursor::new(result.page_index, result.word_index),
                 }
             } else {
-                KeyAction::None
+                KeyAction::Empty
             }
         }
         gdk::Key::j | gdk::Key::Down => {
@@ -253,7 +265,7 @@ pub fn handle_visual_mode_key(
                     cursor: WordCursor::new(result.page_index, result.word_index),
                 }
             } else {
-                KeyAction::None
+                KeyAction::Empty
             }
         }
 
@@ -277,7 +289,7 @@ pub fn handle_visual_mode_key(
             if !has_selection {
                 KeyAction::ShowDefinition { cursor }
             } else {
-                KeyAction::None
+                KeyAction::Empty
             }
         }
 
@@ -294,15 +306,10 @@ pub fn handle_visual_mode_key(
             }
         }
 
-        // Note: 'o' for OpenFile is handled directly in handle_mode_key before document check
+        gdk::Key::f => KeyAction::PendingForward,
 
-        // Find forward (f + char)
-        gdk::Key::f => KeyAction::StartFindForward,
+        gdk::Key::F => KeyAction::PendingBackward,
 
-        // Find backward (F + char)
-        gdk::Key::F => KeyAction::StartFindBackward,
-
-        // Copy to clipboard (selection or cursor word)
         gdk::Key::c => {
             if let Some((start, end)) = mode.selection_range() {
                 KeyAction::CopyToClipboard { start, end }
@@ -327,6 +334,6 @@ pub fn handle_visual_mode_key(
         // Zoom out
         gdk::Key::minus => KeyAction::ZoomOut,
 
-        _ => KeyAction::None,
+        _ => None,
     }
 }

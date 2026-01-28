@@ -1498,8 +1498,8 @@ impl EyersWindow {
         self.pdf_view().connect_closure(
             "current-page-updated",
             false,
-            closure_local!(|_pdf_view: &PdfView, current_page: u32, all_pages: u32| {
-                let page_indicator_text = format!("[{current_page}/{all_pages}]");
+            closure_local!(|_pdf_view: &PdfView, current_page: u32, total_pages: u32| {
+                let page_indicator_text = format!("[{current_page}/{total_pages}]");
                 header_bar.set_pages_indicator_text(&page_indicator_text);
             }),
         );

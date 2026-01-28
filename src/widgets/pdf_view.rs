@@ -47,7 +47,7 @@ mod imp {
         pub(super) rendered_pages: RefCell<HashSet<usize>>,
         pub selection_start: RefCell<Option<SelectionPoint>>,
         pub current_page: Cell<u16>,
-        pub all_pages: Cell<u16>,
+        pub total_pages: Cell<u16>,
         pub pending_update: Cell<bool>,
         pub visual_cursor: RefCell<Option<WordCursor>>,
         pub visual_selection: RefCell<Option<(WordCursor, WordCursor)>>,
@@ -72,7 +72,7 @@ mod imp {
                 rendered_pages: RefCell::new(HashSet::new()),
                 selection_start: RefCell::new(None),
                 current_page: Cell::new(0),
-                all_pages: Cell::new(0),
+                total_pages: Cell::new(0),
                 pending_update: Cell::new(false),
                 visual_cursor: RefCell::new(None),
                 visual_selection: RefCell::new(None),
@@ -152,7 +152,7 @@ impl PdfView {
             .load_pdf_from_file(&path, None)
             .map_err(|e| format!("Failed to open PDF: {}", e))?;
 
-        self.set_all_pages(document.pages().len());
+        self.set_total_pages(document.pages().len());
 
         let entries = bookmarks::extract_bookmarks(&document);
         self.imp().bookmarks.replace(Some(entries));
@@ -601,12 +601,12 @@ impl PdfView {
         self.imp().current_page.get()
     }
 
-    pub fn all_pages(&self) -> u16 {
-        self.imp().all_pages.get()
+    pub fn total_pages(&self) -> u16 {
+        self.imp().total_pages.get()
     }
 
-    pub fn set_all_pages(&self, pages: u16) {
-        self.imp().all_pages.set(pages);
+    pub fn set_total_pages(&self, pages: u16) {
+        self.imp().total_pages.set(pages);
     }
 
     fn setup_scroll_tracking(&self) {
@@ -650,7 +650,7 @@ impl PdfView {
             self.imp().current_page.set(page_index);
             self.emit_by_name::<()>(
                 "current-page-updated",
-                &[&(page_index as u32), &(self.all_pages() as u32)],
+                &[&(page_index as u32), &(self.total_pages() as u32)],
             )
         }
     }

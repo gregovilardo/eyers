@@ -8,6 +8,9 @@ use pdfium_render::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 
+use crate::modes::key_handler::ScrollDir;
+use crate::modes::key_handler::handle_post_global_key;
+use crate::modes::key_handler::handle_pre_global_key;
 use crate::modes::{
     AppMode, KeyAction, WordCursor, handle_normal_mode_key, handle_visual_mode_key,
 };
@@ -30,12 +33,11 @@ mod imp {
         pub text_cache: RefCell<Option<TextMapCache>>,
         /// Pending find direction: Some(true) = forward, Some(false) = backward
         pub pending_find: RefCell<Option<bool>>,
-        /// Pending 'g' key for gg command
-        pub pending_g: Cell<bool>,
         /// Toast revealer for copy feedback
         pub toast_revealer: gtk::Revealer,
         /// Toast label for displaying message
         pub toast_label: gtk::Label,
+        pub keyaction_state: Cell<KeyAction>,
     }
 
     impl Default for EyersWindow {
@@ -60,9 +62,9 @@ mod imp {
                 app_mode: RefCell::new(AppMode::default()),
                 text_cache: RefCell::new(None),
                 pending_find: RefCell::new(None),
-                pending_g: Cell::new(false),
                 toast_revealer,
                 toast_label,
+                keyaction_state: Cell::new(KeyAction::None),
             }
         }
     }
@@ -269,44 +271,27 @@ impl EyersWindow {
         controller.connect_key_pressed(move |_, key, _, modifiers| {
             if let Some(window) = window_weak.upgrade() {
                 let imp = window.imp();
+
                 let toc_visible = imp.toc_panel.is_visible();
-
-                if key == gtk::gdk::Key::Tab {
-                    window.toggle_toc_panel();
+                let action = handle_pre_global_key(key, modifiers, toc_visible);
+                if action != KeyAction::None {
+                    window.set_keyaction_state(action);
+                }
+                if window.execute_key_action(action) {
                     return glib::Propagation::Stop;
                 }
 
-                // Toggle header bar visibility with 'b'
-                if key == gtk::gdk::Key::b {
-                    window.toggle_header_bar();
+                // Handle mode-based key events
+                if window.handle_mode_key(key) {
                     return glib::Propagation::Stop;
                 }
 
-                if toc_visible {
-                    match key {
-                        gtk::gdk::Key::j | gtk::gdk::Key::Down => {
-                            imp.toc_panel.select_next();
-                            return glib::Propagation::Stop;
-                        }
-                        gtk::gdk::Key::k | gtk::gdk::Key::Up => {
-                            imp.toc_panel.select_prev();
-                            return glib::Propagation::Stop;
-                        }
-                        gtk::gdk::Key::Return => {
-                            imp.toc_panel.navigate_and_close();
-                            return glib::Propagation::Stop;
-                        }
-                        gtk::gdk::Key::Escape => {
-                            imp.toc_panel.set_visible(false);
-                            return glib::Propagation::Stop;
-                        }
-                        _ => {}
-                    }
-                } else {
-                    // Handle mode-based key events
-                    if window.handle_mode_key(key, modifiers) {
-                        return glib::Propagation::Stop;
-                    }
+                let action = handle_post_global_key(key);
+                if action != KeyAction::None {
+                    window.set_keyaction_state(action);
+                }
+                if window.execute_key_action(action) {
+                    return glib::Propagation::Stop;
                 }
             }
             glib::Propagation::Proceed
@@ -316,23 +301,8 @@ impl EyersWindow {
     }
 
     /// Handle key press based on current mode
-    fn handle_mode_key(&self, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
+    fn handle_mode_key(&self, key: gtk::gdk::Key) -> bool {
         let imp = self.imp();
-
-        // Handle Ctrl+d / Ctrl+u for half-page scrolling (works in both modes)
-        if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
-            match key {
-                gtk::gdk::Key::d => {
-                    self.scroll_half_page(true); // down
-                    return true;
-                }
-                gtk::gdk::Key::u => {
-                    self.scroll_half_page(false); // up
-                    return true;
-                }
-                _ => {}
-            }
-        }
 
         // Check if we're waiting for a find target character (f/F was pressed)
         if let Some(forward) = imp.pending_find.take() {
@@ -343,31 +313,23 @@ impl EyersWindow {
             return false;
         }
 
-        // Handle 'o' key for opening files - works even without document loaded
-        if key == gtk::gdk::Key::o {
-            self.show_open_dialog();
-            return true;
-        }
-
         // Need document to be loaded for other mode operations
         if !imp.pdf_view.has_document() {
             return false;
         }
 
         let mode = imp.app_mode.borrow().clone();
-        let pending_g = imp.pending_g.get();
 
-        // Clear pending_g state (will be set again if needed by PendingG action)
-        imp.pending_g.set(false);
+        let keyaction_state = self.keyaction_state();
 
         let action = match &mode {
-            AppMode::Normal => handle_normal_mode_key(key, pending_g),
+            AppMode::Normal => handle_normal_mode_key(key, keyaction_state),
             AppMode::Visual { .. } => {
                 let doc_borrow = imp.pdf_view.document();
                 if let Some(ref doc) = *doc_borrow {
                     let mut cache = imp.text_cache.borrow_mut();
                     if let Some(ref mut cache) = *cache {
-                        handle_visual_mode_key(key, &mode, cache, doc, pending_g)
+                        handle_visual_mode_key(key, &mode, cache, doc, keyaction_state)
                     } else {
                         return false;
                     }
@@ -376,7 +338,9 @@ impl EyersWindow {
                 }
             }
         };
-
+        if action != KeyAction::None {
+            self.set_keyaction_state(action);
+        }
         self.execute_key_action(action)
     }
 
@@ -387,7 +351,42 @@ impl EyersWindow {
         match action {
             KeyAction::None => false,
 
-            KeyAction::Scroll {
+            KeyAction::ToggleTOC => {
+                self.toggle_toc_panel();
+                true
+            }
+
+            KeyAction::SelectChapter => {
+                self.toc_panel().navigate_and_close();
+                true
+            }
+
+            KeyAction::ScrollHalfPage(direction) => {
+                self.scroll_half_page(direction);
+                true
+            }
+
+            KeyAction::ToggleHeaderBar => {
+                self.toggle_header_bar();
+                true
+            }
+
+            KeyAction::ScrollTOC(ScrollDir::Down) => {
+                self.toc_panel().select_next();
+                true
+            }
+
+            KeyAction::ScrollTOC(ScrollDir::Up) => {
+                self.toc_panel().select_prev();
+                true
+            }
+
+            KeyAction::OpenFile => {
+                self.show_open_dialog();
+                true
+            }
+
+            KeyAction::ScrollViewport {
                 x_percent,
                 y_percent,
             } => {
@@ -508,8 +507,15 @@ impl EyersWindow {
                 true
             }
 
-            KeyAction::PendingG => {
-                imp.pending_g.set(true);
+            KeyAction::PendingG => true,
+            KeyAction::PendingF => true,
+            KeyAction::FindFoward => {
+                self.execute_find(ch, true);
+                true
+            }
+
+            KeyAction::FindBackward => {
+                self.execute_find(ch, false);
                 true
             }
 
@@ -551,9 +557,13 @@ impl EyersWindow {
     }
 
     /// Scroll half a page and update cursor in Visual mode
-    fn scroll_half_page(&self, down: bool) {
+    fn scroll_half_page(&self, direction: ScrollDir) {
         let imp = self.imp();
-        let y_percent = if down { 50.0 } else { -50.0 };
+        let y_percent = match direction {
+            ScrollDir::Up => -50.0,
+            ScrollDir::Down => 50.0,
+        };
+
         self.scroll_by_percent(0.0, y_percent);
 
         // In Visual mode, update cursor to word at ~20% from viewport top
@@ -1535,5 +1545,12 @@ impl EyersWindow {
 
     pub fn translation_panel(&self) -> &TranslationPanel {
         &self.imp().translation_panel
+    }
+
+    pub fn set_keyaction_state(&self, keyaction: KeyAction) {
+        self.imp().keyaction_state.set(keyaction);
+    }
+    pub fn keyaction_state(&self) -> KeyAction {
+        self.imp().keyaction_state.get()
     }
 }

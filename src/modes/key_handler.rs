@@ -11,10 +11,8 @@ pub enum ScrollDir {
     Down,
 }
 
-/// Result of handling a key press
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum KeyAction {
-    /// No action needed
     Empty,
     OpenFile,
     ToggleHeaderBar,
@@ -25,52 +23,24 @@ pub enum KeyAction {
     ScrollTOC(ScrollDir),
     SelectChapter,
 
-    ScrollViewport {
-        x_percent: f64,
-        y_percent: f64,
-    },
-    /// Enter visual mode (need to compute first visible word)
+    ScrollViewport { x_percent: f64, y_percent: f64 },
     EnterVisual,
-    /// Exit to normal mode
     ExitVisual,
-    /// Cursor moved to new position
-    CursorMoved {
-        cursor: WordCursor,
-    },
-    /// Toggle selection
+    CursorMoved { cursor: WordCursor },
     ToggleSelection,
-    /// Clear selection (Esc with active selection)
     ClearSelection,
-    /// Show definition for current word (or close if already open)
-    ShowDefinition {
-        cursor: WordCursor,
-    },
-    /// Translate current word or selection (or close panel if already open)
-    Translate {
-        start: WordCursor,
-        end: WordCursor,
-    },
-    CopyToClipboard {
-        start: WordCursor,
-        end: WordCursor,
-    },
-    /// Scroll to start of document (gg in vim)
+    ShowDefinition { cursor: WordCursor },
+    Translate { start: WordCursor, end: WordCursor },
+    CopyToClipboard { start: WordCursor, end: WordCursor },
     ScrollToStart,
-    /// Scroll to end of document (G in vim)
     ScrollToEnd,
-    /// First 'g' pressed, waiting for second 'g'
     PendingG,
     PendingForward,
     PendingBackward,
-    FindForward {
-        letter: char,
-    },
-    FindBackward {
-        letter: char,
-    },
-    /// Zoom in (+)
+    // PendingNumber { number: u32 },
+    FindForward { letter: char },
+    FindBackward { letter: char },
     ZoomIn,
-    /// Zoom out (-)
     ZoomOut,
 }
 
@@ -78,12 +48,26 @@ pub fn handle_pre_global_key(
     keyval: gdk::Key,
     modifiers: ModifierType,
     is_toc_visible: bool,
+    key_action: KeyAction,
 ) -> Option<KeyAction> {
     if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
         return match keyval {
             gtk::gdk::Key::d => Some(KeyAction::ScrollHalfPage(ScrollDir::Down)),
             gtk::gdk::Key::u => Some(KeyAction::ScrollHalfPage(ScrollDir::Up)),
-            _ => Some(KeyAction::Empty),
+            _ => None,
+        };
+    }
+
+    match key_action {
+        KeyAction::PendingForward => return None,
+        KeyAction::PendingBackward => return None,
+        _ => {}
+    }
+
+    if matches!(key_action, KeyAction::PendingG) {
+        return match keyval {
+            gdk::Key::g => Some(KeyAction::ScrollToStart),
+            _ => Some(KeyAction::Empty), // Any other key cancels the pending 'g'
         };
     }
 
@@ -94,7 +78,7 @@ pub fn handle_pre_global_key(
             if is_toc_visible {
                 Some(KeyAction::ScrollTOC(ScrollDir::Down))
             } else {
-                Some(KeyAction::Empty)
+                None
             }
         }
 
@@ -102,10 +86,12 @@ pub fn handle_pre_global_key(
             if is_toc_visible {
                 Some(KeyAction::ScrollTOC(ScrollDir::Up))
             } else {
-                Some(KeyAction::Empty)
+                None
             }
         }
         gdk::Key::Return => Some(KeyAction::SelectChapter),
+        gdk::Key::g => Some(KeyAction::PendingG),
+        gdk::Key::G => Some(KeyAction::ScrollToEnd),
 
         // gdk::Key::Escape => {
         //     imp.toc_panel.set_visible(false);
@@ -123,18 +109,8 @@ pub fn handle_post_global_key(keyval: gdk::Key) -> Option<KeyAction> {
     }
 }
 
-/// Handle a key press in Normal mode
 pub fn handle_normal_mode_key(keyval: gdk::Key, key_action: KeyAction) -> Option<KeyAction> {
-    // If 'g' was previously pressed, check for 'gg' sequence
-    if matches!(key_action, KeyAction::PendingG) {
-        return match keyval {
-            gdk::Key::g => Some(KeyAction::ScrollToStart),
-            _ => Some(KeyAction::Empty), // Any other key cancels the pending 'g'
-        };
-    }
-
     match keyval {
-        // Navigation - scroll viewport by 10%
         gdk::Key::h | gdk::Key::Left => Some(KeyAction::ScrollViewport {
             x_percent: -10.0,
             y_percent: 0.0,
@@ -151,21 +127,13 @@ pub fn handle_normal_mode_key(keyval: gdk::Key, key_action: KeyAction) -> Option
             x_percent: 0.0,
             y_percent: 10.0,
         }),
-        // Enter visual mode
         gdk::Key::v => Some(KeyAction::EnterVisual),
-        // First 'g' pressed - wait for second 'g'
-        gdk::Key::g => Some(KeyAction::PendingG),
-        // 'G' (shift+g) - go to end of document
-        gdk::Key::G => Some(KeyAction::ScrollToEnd),
-        // Zoom in
         gdk::Key::plus | gdk::Key::equal => Some(KeyAction::ZoomIn),
-        // Zoom out
         gdk::Key::minus => Some(KeyAction::ZoomOut),
         _ => None,
     }
 }
 
-/// Handle a key press in Visual mode
 pub fn handle_visual_mode_key(
     keyval: gdk::Key,
     mode: &AppMode,
@@ -181,14 +149,8 @@ pub fn handle_visual_mode_key(
         AppMode::Normal => return None,
     };
 
-    // If 'g' was previously pressed, check for 'gg' sequence
-    if matches!(key_action, KeyAction::PendingG) {
-        return match keyval {
-            gdk::Key::g => Some(KeyAction::ScrollToStart),
-            _ => Some(KeyAction::Empty), // Any other key cancels the pending 'g'
-        };
-    }
-
+    // !TODO: Aca si apretas TAB para mayuscula devuelve empty
+    // es caseinsensitive por lo que no haria falta pero puede ser molesto
     if matches!(key_action, KeyAction::PendingForward) {
         if let Some(letter) = keyval.to_unicode() {
             return Some(KeyAction::FindForward { letter: letter });
@@ -204,8 +166,6 @@ pub fn handle_visual_mode_key(
     }
 
     match keyval {
-        // Navigation - move cursor
-        gdk::Key::o => Some(KeyAction::OpenFile),
         gdk::Key::h | gdk::Key::Left => {
             if let Some(result) = navigate(
                 cache,
@@ -267,10 +227,8 @@ pub fn handle_visual_mode_key(
             }
         }
 
-        // Exit visual mode
         gdk::Key::v => Some(KeyAction::ExitVisual),
 
-        // Escape - clear selection first, then exit
         gdk::Key::Escape => {
             if has_selection {
                 Some(KeyAction::ClearSelection)
@@ -279,10 +237,8 @@ pub fn handle_visual_mode_key(
             }
         }
 
-        // Toggle selection
         gdk::Key::s => Some(KeyAction::ToggleSelection),
 
-        // Show definition (only if no selection)
         gdk::Key::d => {
             if !has_selection {
                 Some(KeyAction::ShowDefinition { cursor })
@@ -291,7 +247,6 @@ pub fn handle_visual_mode_key(
             }
         }
 
-        // Translate (current word or selection)
         gdk::Key::t => {
             if let Some((start, end)) = mode.selection_range() {
                 Some(KeyAction::Translate { start, end })
@@ -305,7 +260,6 @@ pub fn handle_visual_mode_key(
         }
 
         gdk::Key::f => Some(KeyAction::PendingForward),
-
         gdk::Key::F => Some(KeyAction::PendingBackward),
 
         gdk::Key::c => {
@@ -320,16 +274,7 @@ pub fn handle_visual_mode_key(
             }
         }
 
-        // First 'g' pressed - wait for second 'g'
-        gdk::Key::g => Some(KeyAction::PendingG),
-
-        // 'G' (shift+g) - go to end of document
-        gdk::Key::G => Some(KeyAction::ScrollToEnd),
-
-        // Zoom in
         gdk::Key::plus | gdk::Key::equal => Some(KeyAction::ZoomIn),
-
-        // Zoom out
         gdk::Key::minus => Some(KeyAction::ZoomOut),
 
         _ => None,

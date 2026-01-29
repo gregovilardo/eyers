@@ -270,7 +270,12 @@ impl EyersWindow {
                 let imp = window.imp();
                 let toc_visible = imp.toc_panel.is_visible();
 
-                if let Some(action) = handle_pre_global_key(key, modifiers, toc_visible) {
+                let keyaction_state = window.keyaction_state();
+                //None -> proceed
+                //Empty -> Stop
+                if let Some(action) =
+                    handle_pre_global_key(key, modifiers, toc_visible, keyaction_state)
+                {
                     window.set_keyaction_state(action);
                     if window.execute_key_action(action) {
                         return glib::Propagation::Stop;
@@ -324,6 +329,7 @@ impl EyersWindow {
                 }
             }
         } {
+            println!("action from window {action:?}");
             self.set_keyaction_state(action);
             return self.execute_key_action(action);
         };
@@ -335,7 +341,7 @@ impl EyersWindow {
         let imp = self.imp();
 
         match action {
-            KeyAction::Empty => false,
+            KeyAction::Empty => true,
 
             KeyAction::ToggleTOC => {
                 self.toggle_toc_panel();
@@ -487,6 +493,7 @@ impl EyersWindow {
             KeyAction::PendingForward => true,
             KeyAction::PendingBackward => true,
             KeyAction::FindForward { letter } => {
+                // !TODO: Change this function, horrible boolean value
                 self.execute_find(letter, true);
                 true
             }

@@ -23,7 +23,6 @@ impl PageTextMap {
     /// Build a PageTextMap by extracting all words from a PDF page
     pub fn build_from_page(page: &PdfPage, page_index: usize) -> Option<Self> {
         let text_page = page.text().ok()?;
-        println!("page.text() {}", text_page);
         let page_width = page.width().value as f64;
         let page_height = page.height().value as f64;
 
@@ -34,7 +33,6 @@ impl PageTextMap {
         for char_obj in chars.iter() {
             if let (Some(unicode), Ok(bounds)) = (char_obj.unicode_char(), char_obj.tight_bounds())
             {
-                println!("Carácter: '{}', Código: U+{:X}", unicode, unicode as u32);
                 char_data.push(CharData {
                     char: unicode,
                     index: char_obj.index() as usize,

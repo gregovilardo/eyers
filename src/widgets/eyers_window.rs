@@ -333,7 +333,6 @@ impl EyersWindow {
                 }
             }
         } {
-            println!("action from window {action:?}");
             self.set_keyaction_state(action);
             return self.execute_key_action(action);
         };
@@ -402,7 +401,7 @@ impl EyersWindow {
                     self.update_mode_display();
                     imp.pdf_view.set_cursor(Some(cursor));
                     self.update_highlights();
-                    self.print_cursor_word(cursor);
+                    // self.print_cursor_word(cursor);
                     true
                 } else {
                     println!("Could not find first visible word");
@@ -423,10 +422,10 @@ impl EyersWindow {
             }
 
             KeyAction::CursorMoved { cursor } => {
-                println!(
-                    "Cursor moved to page {} word {}",
-                    cursor.page_index, cursor.word_index
-                );
+                // println!(
+                //     "Cursor moved to page {} word {}",
+                //     cursor.page_index, cursor.word_index
+                // );
                 {
                     let mut mode = imp.app_mode.borrow_mut();
                     mode.set_cursor(cursor);
@@ -435,7 +434,7 @@ impl EyersWindow {
                 // Update selection display to sync anchor-to-cursor range if selection is active
                 self.update_selection_display();
                 self.ensure_cursor_visible(cursor);
-                self.print_cursor_word(cursor);
+                // self.print_cursor_word(cursor);
                 true
             }
 
@@ -525,7 +524,6 @@ impl EyersWindow {
 
         if !matches!(action, KeyAction::PendingNumber { number: _ }) {
             if !matches!(action, KeyAction::PendingG) {
-                println!("borrando pending number");
                 self.imp().pending_number.set(0);
             }
         }

@@ -337,6 +337,14 @@ impl PdfView {
         _overlay: &Overlay,
         highlight: &HighlightOverlay,
     ) {
+        // !TODO: remove comment code
+        // if let Ok(media_box) = page.boundaries().media() {
+        //     println!("mediabox {media_box:#?}");
+        // }
+        // if let Ok(crop_box) = page.boundaries().crop() {
+        //     println!("crop_boxl {crop_box:#?}");
+        // }
+
         let zoom = self.imp().zoom_level.get();
         let config = create_render_config_with_zoom(zoom);
 

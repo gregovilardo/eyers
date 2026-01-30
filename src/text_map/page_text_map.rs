@@ -29,10 +29,25 @@ impl PageTextMap {
         // Extract all characters with their bounds
         let chars = text_page.chars();
         let mut char_data: Vec<CharData> = Vec::new();
+        // !TODO remove expect
+        let media_box = page.boundaries().media().expect("mediabox").bounds;
+        let crop_box = page
+            .boundaries()
+            .crop()
+            .map(|b| b.bounds)
+            .unwrap_or(media_box);
 
         for char_obj in chars.iter() {
             if let (Some(unicode), Ok(bounds)) = (char_obj.unicode_char(), char_obj.tight_bounds())
             {
+                // Fix bounds if any
+                let bounds = PdfRect::new(
+                    PdfPoints::new(bounds.bottom().value - crop_box.bottom().value),
+                    PdfPoints::new(bounds.left().value - crop_box.left().value),
+                    PdfPoints::new(bounds.top().value - crop_box.bottom().value),
+                    PdfPoints::new(bounds.right().value - crop_box.left().value),
+                );
+
                 char_data.push(CharData {
                     char: unicode,
                     index: char_obj.index() as usize,
@@ -134,42 +149,73 @@ impl PageTextMap {
     }
 
     /// Group words into lines based on y-coordinate proximity and reorder into reading order.
-    ///
-    /// Strategy:
-    /// 1. Sort words by y-center descending (top-to-bottom)
-    /// 2. Cluster into lines using threshold - assign each word a line_index
-    /// 3. Sort by (line_index, center_x) - this is a proper total order (transitive)
-    /// 4. Reorder words array and build LineInfo with correct word ranges
     fn group_into_lines(words: &mut [WordInfo]) -> Vec<LineInfo> {
         if words.is_empty() {
             return Vec::new();
         }
 
-        // Calculate average character height for threshold
-        let avg_height: f64 = words
-            .iter()
-            .map(|w| (w.bounds.top().value - w.bounds.bottom().value) as f64)
-            .sum::<f64>()
-            / words.len() as f64;
-
+        let avg_height = Self::calc_avg_char_height(words);
         let threshold = avg_height * LINE_GROUPING_THRESHOLD;
 
-        // Step 1: Sort word indices by y-center descending (top first in PDF coords)
-        let mut word_indices: Vec<usize> = (0..words.len()).collect();
-        word_indices.sort_by(|&a, &b| words[b].center_y.total_cmp(&words[a].center_y));
+        // 1. sort indices by center_y descending (top-first in PDF coords)
+        // let indices = Self::sorted_indices_by_center_y_desc(words);
+        // !TODO averiguar si podemos confiar en el orden secuencial normal
+        // o si en algunos pdf conviene ordenar llamando a sorted_indices_by_center_y_desc
+        // en caso de que asi sea arreglar esa funcion
+        let indices: Vec<usize> = (0..words.len()).collect(); //confiamos en el orden de [WordInfo]
+        // let indices = Vec::new
 
-        // Step 2: Cluster into lines and assign line_index to each word
-        // Also track line y-centers for LineInfo
+        // 2. cluster into lines and assign line_index on words; collect line y-centers
+        let line_y_centers = Self::cluster_assign_line_indices(words, &indices, threshold);
+
+        // 3. stable sort indices by (line_index, center_x)
+        let sorted_by_line_and_x = Self::sort_indices_by_line_and_x(words, &indices);
+
+        // 4. reorder the words slice according to sorted indices
+        Self::reorder_words_by_indices(words, &sorted_by_line_and_x);
+
+        println!("avg_height {avg_height}");
+        println!("indices {indices:?}");
+        println!("line_y_centers {line_y_centers:?}");
+        println!("sorted_by_line_and_x {sorted_by_line_and_x:?}");
+
+        // 5. build LineInfo objects from the reordered words and line y-centers
+        Self::build_line_infos(words, &line_y_centers)
+    }
+
+    /// Calculate the average character height used to derive the grouping threshold.
+    fn calc_avg_char_height(words: &[WordInfo]) -> f64 {
+        let sum: f64 = words
+            .iter()
+            .map(|w| (w.bounds.top().value - w.bounds.bottom().value) as f64)
+            .sum();
+        sum / words.len() as f64
+    }
+
+    /// Return a Vec<usize> of indices sorted by center_y descending (top of page first).
+    fn sorted_indices_by_center_y_desc(words: &[WordInfo]) -> Vec<usize> {
+        let mut indices: Vec<usize> = (0..words.len()).collect();
+        indices.sort_by(|&a, &b| words[b].center_y.total_cmp(&words[a].center_y));
+        indices
+    }
+
+    /// Iterate the provided sorted indices (by y) to cluster words into lines, setting each
+    /// word's line_index and returning a vector of line y-centers in order.
+    fn cluster_assign_line_indices(
+        words: &mut [WordInfo],
+        sorted_indices: &[usize],
+        threshold: f64,
+    ) -> Vec<f64> {
         let mut line_y_centers: Vec<f64> = Vec::new();
         let mut current_line_y: Option<f64> = None;
         let mut current_line_idx: usize = 0;
 
-        for &word_idx in &word_indices {
+        for &word_idx in sorted_indices {
             let word_y = words[word_idx].center_y;
 
             match current_line_y {
                 Some(line_y) if (word_y - line_y).abs() <= threshold => {
-                    // Same line - assign current line index
+                    // Same line
                     words[word_idx].line_index = current_line_idx;
                 }
                 _ => {
@@ -184,8 +230,13 @@ impl PageTextMap {
             }
         }
 
-        // Step 3: Sort by (line_index, center_x) - proper total order, no transitivity issues
-        word_indices.sort_by(|&a, &b| {
+        line_y_centers
+    }
+
+    /// Sort indices by (line_index, center_x) to produce the reading order within each line.
+    fn sort_indices_by_line_and_x(words: &[WordInfo], indices: &[usize]) -> Vec<usize> {
+        let mut idxs = indices.to_vec();
+        idxs.sort_by(|&a, &b| {
             let line_cmp = words[a].line_index.cmp(&words[b].line_index);
             if line_cmp != std::cmp::Ordering::Equal {
                 line_cmp
@@ -193,15 +244,21 @@ impl PageTextMap {
                 words[a].center_x.total_cmp(&words[b].center_x)
             }
         });
+        idxs
+    }
 
-        // Step 4: Reorder words array according to sorted indices
-        let reordered: Vec<WordInfo> = word_indices
+    /// Reorder the `words` slice in place according to `indices` (which maps new order <- old indices).
+    fn reorder_words_by_indices(words: &mut [WordInfo], indices: &[usize]) {
+        let reordered: Vec<WordInfo> = indices
             .iter()
             .map(|&old_idx| words[old_idx].clone())
             .collect();
+        // Replace the contents of `words` with the new order
         words.clone_from_slice(&reordered);
+    }
 
-        // Step 5: Build LineInfo with correct word ranges
+    /// Build LineInfo ranges from the reordered words and the recorded line y-centers.
+    fn build_line_infos(words: &[WordInfo], line_y_centers: &[f64]) -> Vec<LineInfo> {
         let mut lines: Vec<LineInfo> = Vec::new();
         let mut current_line_start: usize = 0;
         let mut prev_line_index: Option<usize> = None;
@@ -209,10 +266,10 @@ impl PageTextMap {
         for (new_idx, word) in words.iter().enumerate() {
             match prev_line_index {
                 Some(prev_idx) if word.line_index == prev_idx => {
-                    // Same line, continue
+                    // same line; continue
                 }
                 _ => {
-                    // New line - finalize previous
+                    // new line: finalize previous (if any)
                     if let Some(prev_idx) = prev_line_index {
                         let line_y = line_y_centers.get(prev_idx).copied().unwrap_or(0.0);
                         lines.push(LineInfo::new(current_line_start, new_idx, line_y));
@@ -223,7 +280,7 @@ impl PageTextMap {
             }
         }
 
-        // Finalize last line
+        // finalize last line
         if let Some(prev_idx) = prev_line_index {
             let line_y = line_y_centers.get(prev_idx).copied().unwrap_or(0.0);
             lines.push(LineInfo::new(current_line_start, words.len(), line_y));

@@ -23,6 +23,7 @@ This is the anotation, that could have something like $markdown latex$
 - favourite words?
 
 - when moving to a new chapter the visual cursor stays on old page, it should change like it change with ctrl+d
+- copy LaTEX 
 
 
 

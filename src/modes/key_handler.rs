@@ -293,7 +293,7 @@ pub fn handle_visual_mode_key(
         gdk::Key::f => Some(KeyAction::PendingForward),
         gdk::Key::F => Some(KeyAction::PendingBackward),
 
-        gdk::Key::c => {
+        gdk::Key::y => {
             if let Some((start, end)) = mode.selection_range() {
                 Some(KeyAction::CopyToClipboard { start, end })
             } else {

@@ -3,5 +3,5 @@ pub mod page_text_map;
 pub mod text_map_cache;
 pub mod word_info;
 
-pub use navigation::{find_word_on_line_starting_with, navigate, NavDirection};
+pub use navigation::{NavDirection, find_word_on_line_starting_with, navigate};
 pub use text_map_cache::TextMapCache;

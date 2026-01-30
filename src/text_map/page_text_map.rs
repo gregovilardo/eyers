@@ -5,13 +5,83 @@ use crate::text_map::word_info::{LineInfo, WordInfo};
 /// Threshold for considering characters on the same line (as percentage of avg char height)
 const LINE_GROUPING_THRESHOLD: f64 = 0.5;
 
+#[derive(Debug, Clone)]
+enum TextToken {
+    WordInfo(WordInfo),
+    CharData(CharData),
+}
+
+impl TextToken {
+    /// Devuelve una referencia a los bounds del token (palabra o carácter)
+    pub fn bounds(&self) -> &PdfRect {
+        match self {
+            TextToken::WordInfo(word) => &word.bounds,
+            TextToken::CharData(char_data) => &char_data.bounds,
+        }
+    }
+
+    pub fn line_index(&self) -> &usize {
+        match self {
+            TextToken::WordInfo(word) => &word.line_index,
+            TextToken::CharData(char_data) => &char_data.line_index,
+        }
+    }
+
+    pub fn center_y(&self) -> &f64 {
+        match self {
+            TextToken::WordInfo(word) => &word.center_y,
+            TextToken::CharData(char_data) => &char_data.center_y,
+        }
+    }
+    pub fn center_x(&self) -> &f64 {
+        match self {
+            TextToken::WordInfo(word) => &word.center_x,
+            TextToken::CharData(char_data) => &char_data.center_x,
+        }
+    }
+
+    pub fn set_line_index(&mut self, line_index: usize) {
+        match self {
+            TextToken::WordInfo(word) => word.line_index = line_index,
+            TextToken::CharData(char_data) => char_data.line_index = line_index,
+        };
+    }
+}
+
+/// Internal struct for character extraction
+#[derive(Debug, Clone, Copy)]
+struct CharData {
+    char: char,
+    index: usize,
+    bounds: PdfRect,
+    center_x: f64,
+    center_y: f64,
+    line_index: usize,
+}
+
+impl CharData {
+    pub fn new(c: char, index: usize, bounds: PdfRect) -> Self {
+        let center_x = (bounds.left().value as f64 + bounds.right().value as f64) / 2.0;
+        let center_y = (bounds.bottom().value as f64 + bounds.top().value as f64) / 2.0;
+
+        Self {
+            char: c,
+            index,
+            bounds,
+            center_x,
+            center_y,
+            line_index: 0,
+        }
+    }
+}
+
 /// Represents all text data for a single PDF page, organized for efficient navigation
 #[derive(Debug)]
 pub struct PageTextMap {
     /// Page index in the document
     pub page_index: usize,
     /// All words on the page, in reading order (top-to-bottom, left-to-right)
-    pub words: Vec<WordInfo>,
+    pub words: Vec<TextToken>,
     /// Lines of text, each containing a range of word indices
     pub lines: Vec<LineInfo>,
     /// Page dimensions in PDF points
@@ -25,7 +95,6 @@ impl PageTextMap {
         let text_page = page.text().ok()?;
         let page_width = page.width().value as f64;
         let page_height = page.height().value as f64;
-
         // Extract all characters with their bounds
         let chars = text_page.chars();
         let mut char_data: Vec<CharData> = Vec::new();
@@ -47,12 +116,15 @@ impl PageTextMap {
                     PdfPoints::new(bounds.top().value - crop_box.bottom().value),
                     PdfPoints::new(bounds.right().value - crop_box.left().value),
                 );
+                // println!(
+                //     "'{}' U+{:04X} at ({}, {})",
+                //     char_obj.unicode_char().unwrap_or('?'),
+                //     char_obj.unicode_char().unwrap_or('?') as u32,
+                //     bounds.left().value,
+                //     bounds.bottom().value
+                // );
 
-                char_data.push(CharData {
-                    char: unicode,
-                    index: char_obj.index() as usize,
-                    bounds,
-                });
+                char_data.push(CharData::new(unicode, char_obj.index() as usize, bounds));
             }
         }
 
@@ -67,7 +139,7 @@ impl PageTextMap {
         }
 
         // Group characters into words
-        let mut words = Self::extract_words(&char_data);
+        let mut words = Self::extract_words(&mut char_data);
 
         if words.is_empty() {
             return Some(Self {
@@ -82,29 +154,53 @@ impl PageTextMap {
         // Group words into lines and assign line indices
         let lines = Self::group_into_lines(&mut words);
 
-        Some(Self {
+        let word = Some(Self {
             page_index,
             words,
             lines,
             page_width,
             page_height,
-        })
+        });
+        word
     }
 
     /// Extract words from character data
-    fn extract_words(char_data: &[CharData]) -> Vec<WordInfo> {
-        let mut words: Vec<WordInfo> = Vec::new();
+    fn extract_words(char_data: &mut [CharData]) -> Vec<TextToken> {
+        let mut words: Vec<TextToken> = Vec::new();
         let mut current_word_chars: Vec<&CharData> = Vec::new();
+        let mut tilde = false;
 
         for char_info in char_data {
-            if Self::is_word_char(char_info.char) {
-                current_word_chars.push(char_info);
+            // This is for fixing weirldy formatted spanish pdfs
+            if char_info.char == '\u{00B4}' {
+                tilde = true;
             } else {
-                if !current_word_chars.is_empty() {
-                    if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
-                        words.push(word);
+                if Self::is_word_char(char_info.char) {
+                    if tilde {
+                        let new_char = match char_info.char {
+                            'a' => 'á',
+                            'e' => 'é',
+                            'i' => 'í',
+                            'o' => 'ó',
+                            'u' => 'ú',
+                            'ı' => 'í',
+                            _ => char_info.char,
+                        };
+                        char_info.char = new_char;
                     }
-                    current_word_chars.clear();
+                    tilde = false;
+                    current_word_chars.push(char_info);
+                } else {
+                    if !current_word_chars.is_empty() {
+                        if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
+                            words.push(TextToken::WordInfo(word));
+                        }
+                        current_word_chars.clear();
+                    }
+                    // We add special characters so they can be yanked
+                    if !char_info.char.is_whitespace() {
+                        words.push(TextToken::CharData(*char_info));
+                    }
                 }
             }
         }
@@ -112,7 +208,7 @@ impl PageTextMap {
         // Don't forget the last word
         if !current_word_chars.is_empty() {
             if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
-                words.push(word);
+                words.push(TextToken::WordInfo(word));
             }
         }
 
@@ -149,7 +245,7 @@ impl PageTextMap {
     }
 
     /// Group words into lines based on y-coordinate proximity and reorder into reading order.
-    fn group_into_lines(words: &mut [WordInfo]) -> Vec<LineInfo> {
+    fn group_into_lines(words: &mut [TextToken]) -> Vec<LineInfo> {
         if words.is_empty() {
             return Vec::new();
         }
@@ -174,20 +270,15 @@ impl PageTextMap {
         // 4. reorder the words slice according to sorted indices
         Self::reorder_words_by_indices(words, &sorted_by_line_and_x);
 
-        println!("avg_height {avg_height}");
-        println!("indices {indices:?}");
-        println!("line_y_centers {line_y_centers:?}");
-        println!("sorted_by_line_and_x {sorted_by_line_and_x:?}");
-
         // 5. build LineInfo objects from the reordered words and line y-centers
         Self::build_line_infos(words, &line_y_centers)
     }
 
     /// Calculate the average character height used to derive the grouping threshold.
-    fn calc_avg_char_height(words: &[WordInfo]) -> f64 {
+    fn calc_avg_char_height(words: &[TextToken]) -> f64 {
         let sum: f64 = words
             .iter()
-            .map(|w| (w.bounds.top().value - w.bounds.bottom().value) as f64)
+            .map(|w| (w.bounds().top().value - w.bounds().bottom().value) as f64)
             .sum();
         sum / words.len() as f64
     }
@@ -202,7 +293,7 @@ impl PageTextMap {
     /// Iterate the provided sorted indices (by y) to cluster words into lines, setting each
     /// word's line_index and returning a vector of line y-centers in order.
     fn cluster_assign_line_indices(
-        words: &mut [WordInfo],
+        words: &mut [TextToken],
         sorted_indices: &[usize],
         threshold: f64,
     ) -> Vec<f64> {
@@ -211,21 +302,21 @@ impl PageTextMap {
         let mut current_line_idx: usize = 0;
 
         for &word_idx in sorted_indices {
-            let word_y = words[word_idx].center_y;
+            let word_y = words[word_idx].center_y();
 
             match current_line_y {
                 Some(line_y) if (word_y - line_y).abs() <= threshold => {
                     // Same line
-                    words[word_idx].line_index = current_line_idx;
+                    words[word_idx].set_line_index(current_line_idx);
                 }
                 _ => {
                     // New line
                     if current_line_y.is_some() {
                         current_line_idx += 1;
                     }
-                    line_y_centers.push(word_y);
-                    current_line_y = Some(word_y);
-                    words[word_idx].line_index = current_line_idx;
+                    line_y_centers.push(*word_y);
+                    current_line_y = Some(*word_y);
+                    words[word_idx].set_line_index(current_line_idx);
                 }
             }
         }
@@ -234,22 +325,22 @@ impl PageTextMap {
     }
 
     /// Sort indices by (line_index, center_x) to produce the reading order within each line.
-    fn sort_indices_by_line_and_x(words: &[WordInfo], indices: &[usize]) -> Vec<usize> {
+    fn sort_indices_by_line_and_x(words: &[TextToken], indices: &[usize]) -> Vec<usize> {
         let mut idxs = indices.to_vec();
         idxs.sort_by(|&a, &b| {
-            let line_cmp = words[a].line_index.cmp(&words[b].line_index);
+            let line_cmp = words[a].line_index().cmp(&words[b].line_index());
             if line_cmp != std::cmp::Ordering::Equal {
                 line_cmp
             } else {
-                words[a].center_x.total_cmp(&words[b].center_x)
+                words[a].center_x().total_cmp(&words[b].center_x())
             }
         });
         idxs
     }
 
     /// Reorder the `words` slice in place according to `indices` (which maps new order <- old indices).
-    fn reorder_words_by_indices(words: &mut [WordInfo], indices: &[usize]) {
-        let reordered: Vec<WordInfo> = indices
+    fn reorder_words_by_indices(words: &mut [TextToken], indices: &[usize]) {
+        let reordered: Vec<TextToken> = indices
             .iter()
             .map(|&old_idx| words[old_idx].clone())
             .collect();
@@ -258,14 +349,14 @@ impl PageTextMap {
     }
 
     /// Build LineInfo ranges from the reordered words and the recorded line y-centers.
-    fn build_line_infos(words: &[WordInfo], line_y_centers: &[f64]) -> Vec<LineInfo> {
+    fn build_line_infos(words: &[TextToken], line_y_centers: &[f64]) -> Vec<LineInfo> {
         let mut lines: Vec<LineInfo> = Vec::new();
         let mut current_line_start: usize = 0;
         let mut prev_line_index: Option<usize> = None;
 
         for (new_idx, word) in words.iter().enumerate() {
             match prev_line_index {
-                Some(prev_idx) if word.line_index == prev_idx => {
+                Some(prev_idx) if *word.line_index() == prev_idx => {
                     // same line; continue
                 }
                 _ => {
@@ -275,7 +366,7 @@ impl PageTextMap {
                         lines.push(LineInfo::new(current_line_start, new_idx, line_y));
                     }
                     current_line_start = new_idx;
-                    prev_line_index = Some(word.line_index);
+                    prev_line_index = Some(*word.line_index());
                 }
             }
         }
@@ -291,11 +382,11 @@ impl PageTextMap {
 
     /// Check if a character should be part of a word
     fn is_word_char(c: char) -> bool {
-        (!c.is_whitespace() && c.is_alphanumeric()) || c == '\'' || c == '-'
+        (!c.is_whitespace() && c.is_alphanumeric()) || c == '\'' || c == '-' || c == '\u{00B4}'
     }
 
     /// Get the word at a specific index
-    pub fn get_word(&self, index: usize) -> Option<&WordInfo> {
+    pub fn get_word(&self, index: usize) -> Option<&TextToken> {
         self.words.get(index)
     }
 
@@ -305,7 +396,7 @@ impl PageTextMap {
     }
 
     /// Get all words on a specific line
-    pub fn words_on_line(&self, line_index: usize) -> &[WordInfo] {
+    pub fn words_on_line(&self, line_index: usize) -> &[TextToken] {
         if let Some(line) = self.lines.get(line_index) {
             &self.words[line.word_start..line.word_end]
         } else {
@@ -328,8 +419,8 @@ impl PageTextMap {
         // In PDF coords, top > bottom
         // We want the first word (in reading order) that overlaps with the viewport
         for (idx, word) in self.words.iter().enumerate() {
-            let word_top = word.bounds.top().value as f64;
-            let word_bottom = word.bounds.bottom().value as f64;
+            let word_top = word.bounds().top().value as f64;
+            let word_bottom = word.bounds().bottom().value as f64;
 
             // Check if word overlaps with rect vertically
             if word_top >= rect_bottom && word_bottom <= rect_top {
@@ -348,14 +439,6 @@ impl PageTextMap {
     pub fn line_count(&self) -> usize {
         self.lines.len()
     }
-}
-
-/// Internal struct for character extraction
-#[derive(Debug)]
-struct CharData {
-    char: char,
-    index: usize,
-    bounds: PdfRect,
 }
 
 #[cfg(test)]

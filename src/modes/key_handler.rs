@@ -32,16 +32,32 @@ pub enum KeyAction {
     ShowDefinition { cursor: WordCursor },
     Translate { start: WordCursor, end: WordCursor },
     CopyToClipboard { start: WordCursor, end: WordCursor },
-    ScrollToStart,
+    ScrollWithGG,
     ScrollToEnd,
     PendingG,
     PendingForward,
     PendingBackward,
-    // PendingNumber { number: u32 },
+    PendingNumber { number: u32 },
     FindForward { letter: char },
     FindBackward { letter: char },
     ZoomIn,
     ZoomOut,
+}
+
+fn get_number_from_key(keyval: gdk::Key) -> Option<u32> {
+    match keyval {
+        gdk::Key::_0 | gdk::Key::KP_0 => Some(0),
+        gdk::Key::_1 | gdk::Key::KP_1 => Some(1),
+        gdk::Key::_2 | gdk::Key::KP_2 => Some(2),
+        gdk::Key::_3 | gdk::Key::KP_3 => Some(3),
+        gdk::Key::_4 | gdk::Key::KP_4 => Some(4),
+        gdk::Key::_5 | gdk::Key::KP_5 => Some(5),
+        gdk::Key::_6 | gdk::Key::KP_6 => Some(6),
+        gdk::Key::_7 | gdk::Key::KP_7 => Some(7),
+        gdk::Key::_8 | gdk::Key::KP_8 => Some(8),
+        gdk::Key::_9 | gdk::Key::KP_9 => Some(9),
+        _ => None,
+    }
 }
 
 pub fn handle_pre_global_key(
@@ -50,12 +66,26 @@ pub fn handle_pre_global_key(
     is_toc_visible: bool,
     key_action: KeyAction,
 ) -> Option<KeyAction> {
-    if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+    if modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
         return match keyval {
-            gtk::gdk::Key::d => Some(KeyAction::ScrollHalfPage(ScrollDir::Down)),
-            gtk::gdk::Key::u => Some(KeyAction::ScrollHalfPage(ScrollDir::Up)),
+            gdk::Key::d => Some(KeyAction::ScrollHalfPage(ScrollDir::Down)),
+            gdk::Key::u => Some(KeyAction::ScrollHalfPage(ScrollDir::Up)),
             _ => None,
         };
+    }
+
+    if let Some(digit) = get_number_from_key(keyval) {
+        let new_number = match key_action {
+            KeyAction::PendingNumber { number } => {
+                number
+                    .checked_mul(10)
+                    .and_then(|multiplied| multiplied.checked_add(digit))
+                    .unwrap_or(number) // Keep the original number on overflow
+            }
+            _ => digit,
+        };
+        println!("new_number: {new_number}");
+        return Some(KeyAction::PendingNumber { number: new_number });
     }
 
     match key_action {
@@ -66,12 +96,13 @@ pub fn handle_pre_global_key(
 
     if matches!(key_action, KeyAction::PendingG) {
         return match keyval {
-            gdk::Key::g => Some(KeyAction::ScrollToStart),
+            gdk::Key::g => Some(KeyAction::ScrollWithGG),
             _ => Some(KeyAction::Empty), // Any other key cancels the pending 'g'
         };
     }
 
     match keyval {
+        gdk::Key::Escape => Some(KeyAction::Empty), //should go up?
         gdk::Key::Tab => Some(KeyAction::ToggleTOC),
         gdk::Key::j | gdk::Key::Down => {
             //Don't like thiss brou
@@ -149,7 +180,7 @@ pub fn handle_visual_mode_key(
         AppMode::Normal => return None,
     };
 
-    // !TODO: Aca si apretas TAB para mayuscula devuelve empty
+    // !TODO: Aca si apretas SHIFT para mayuscula devuelve empty.
     // es caseinsensitive por lo que no haria falta pero puede ser molesto
     if matches!(key_action, KeyAction::PendingForward) {
         if let Some(letter) = keyval.to_unicode() {

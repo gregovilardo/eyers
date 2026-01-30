@@ -18,6 +18,8 @@ use crate::services::pdf_text::calculate_picture_offset;
 use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::{EyersHeaderBar, HighlightRect, PdfView, TocPanel, TranslationPanel};
 
+const DEFAULT_VIEWPORT_OFFSET: f64 = 0.2;
+
 mod imp {
     use super::*;
 
@@ -36,6 +38,7 @@ mod imp {
         /// Toast label for displaying message
         pub toast_label: gtk::Label,
         pub keyaction_state: Cell<KeyAction>,
+        pub pending_number: Cell<u32>,
     }
 
     impl Default for EyersWindow {
@@ -62,6 +65,7 @@ mod imp {
                 toast_revealer,
                 toast_label,
                 keyaction_state: Cell::new(KeyAction::Empty),
+                pending_number: Cell::new(0),
             }
         }
     }
@@ -256,7 +260,7 @@ impl EyersWindow {
             "chapter-selected",
             false,
             glib::closure_local!(move |_panel: &TocPanel, page_index: u32| {
-                pdf_view.scroll_to_page(page_index as u16);
+                pdf_view.scroll_to_page(page_index);
             }),
         );
     }
@@ -340,7 +344,7 @@ impl EyersWindow {
     fn execute_key_action(&self, action: KeyAction) -> bool {
         let imp = self.imp();
 
-        match action {
+        let result = match action {
             KeyAction::Empty => true,
 
             KeyAction::ToggleTOC => {
@@ -479,8 +483,8 @@ impl EyersWindow {
                 true
             }
 
-            KeyAction::ScrollToStart => {
-                self.scroll_to_document_start();
+            KeyAction::ScrollWithGG => {
+                self.scroll_with_g(self.imp().pending_number.get());
                 true
             }
 
@@ -492,6 +496,11 @@ impl EyersWindow {
             KeyAction::PendingG => true,
             KeyAction::PendingForward => true,
             KeyAction::PendingBackward => true,
+            KeyAction::PendingNumber { number } => {
+                self.imp().pending_number.set(number);
+                true
+            }
+
             KeyAction::FindForward { letter } => {
                 // !TODO: Change this function, horrible boolean value
                 self.execute_find(letter, true);
@@ -512,7 +521,16 @@ impl EyersWindow {
                 self.zoom_out();
                 true
             }
+        };
+
+        if !matches!(action, KeyAction::PendingNumber { number: _ }) {
+            if !matches!(action, KeyAction::PendingG) {
+                println!("borrando pending number");
+                self.imp().pending_number.set(0);
+            }
         }
+
+        return result;
     }
 
     /// Scroll the viewport by a percentage
@@ -542,7 +560,6 @@ impl EyersWindow {
 
     /// Scroll half a page and update cursor in Visual mode
     fn scroll_half_page(&self, direction: ScrollDir) {
-        let imp = self.imp();
         let y_percent = match direction {
             ScrollDir::Up => -50.0,
             ScrollDir::Down => 50.0,
@@ -552,16 +569,24 @@ impl EyersWindow {
 
         // In Visual mode, update cursor to word at ~20% from viewport top
         // This feels more natural than the very first word at the top edge
-        if imp.app_mode.borrow().is_visual() {
-            if let Some(cursor) = self.compute_word_at_viewport_offset(0.20) {
-                {
-                    let mut mode = imp.app_mode.borrow_mut();
-                    mode.set_cursor(cursor);
-                }
-                imp.pdf_view.set_cursor(Some(cursor));
-                self.update_selection_display();
-                self.print_cursor_word(cursor);
-            }
+        if let Some(cursor) = self.compute_word_at_viewport_offset(DEFAULT_VIEWPORT_OFFSET) {
+            self.move_cursor(cursor);
+        }
+    }
+
+    fn scroll_with_g(&self, page_number: u32) {
+        if page_number == 0 {
+            self.scroll_to_document_start();
+            return;
+        }
+        self.scroll_to_page(page_number);
+    }
+
+    fn scroll_to_page(&self, page_number: u32) {
+        let pdf_view = &self.imp().pdf_view;
+        pdf_view.scroll_to_page(page_number);
+        if let Some(cursor) = self.compute_word_at_viewport_offset(DEFAULT_VIEWPORT_OFFSET) {
+            self.move_cursor(cursor)
         }
     }
 
@@ -573,20 +598,11 @@ impl EyersWindow {
         imp.pdf_view.scroll_to_page(0);
 
         // In Visual mode, move cursor to first word of first page
-        if imp.app_mode.borrow().is_visual() {
-            if let Some(cursor) = self.compute_first_word_of_page(0) {
-                {
-                    let mut mode = imp.app_mode.borrow_mut();
-                    mode.set_cursor(cursor);
-                }
-                imp.pdf_view.set_cursor(Some(cursor));
-                self.update_selection_display();
-                self.print_cursor_word(cursor);
-            }
+        if let Some(cursor) = self.compute_first_word_of_page(0) {
+            self.move_cursor(cursor);
         }
     }
 
-    /// Scroll to the end of the document (G in vim)
     fn scroll_to_document_end(&self) {
         let imp = self.imp();
 
@@ -604,21 +620,24 @@ impl EyersWindow {
         };
         drop(doc_borrow);
 
-        // Scroll to last page
-        imp.pdf_view.scroll_to_page(last_page);
+        imp.pdf_view.scroll_to_page(last_page as u32);
 
-        // In Visual mode, move cursor to last word of last page
+        if let Some(cursor) = self.compute_last_word_of_page(last_page as usize) {
+            self.move_cursor(cursor);
+        }
+    }
+
+    fn move_cursor(&self, cursor: WordCursor) {
+        let imp = self.imp();
         if imp.app_mode.borrow().is_visual() {
-            if let Some(cursor) = self.compute_last_word_of_page(last_page as usize) {
-                {
-                    let mut mode = imp.app_mode.borrow_mut();
-                    mode.set_cursor(cursor);
-                }
-                imp.pdf_view.set_cursor(Some(cursor));
-                self.update_selection_display();
-                self.ensure_cursor_visible(cursor);
-                self.print_cursor_word(cursor);
+            {
+                let mut mode = imp.app_mode.borrow_mut();
+                mode.set_cursor(cursor);
             }
+            imp.pdf_view.set_cursor(Some(cursor));
+            self.update_selection_display();
+            self.ensure_cursor_visible(cursor);
+            self.print_cursor_word(cursor);
         }
     }
 

@@ -67,7 +67,7 @@ impl PageTextMap {
         }
 
         // Group characters into words
-        let mut words = Self::extract_words(&char_data);
+        let mut words = Self::extract_words(&mut char_data);
 
         if words.is_empty() {
             return Some(Self {
@@ -91,20 +91,38 @@ impl PageTextMap {
         })
     }
 
-    /// Extract words from character data
-    fn extract_words(char_data: &[CharData]) -> Vec<WordInfo> {
+    fn extract_words(char_data: &mut [CharData]) -> Vec<WordInfo> {
         let mut words: Vec<WordInfo> = Vec::new();
         let mut current_word_chars: Vec<&CharData> = Vec::new();
+        let mut tilde = false;
 
         for char_info in char_data {
-            if Self::is_word_char(char_info.char) {
-                current_word_chars.push(char_info);
+            // This is for fixing weirldy formatted spanish pdfs
+            if char_info.char == '\u{00B4}' {
+                tilde = true;
             } else {
-                if !current_word_chars.is_empty() {
-                    if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
-                        words.push(word);
+                if Self::is_word_char(char_info.char) {
+                    if tilde {
+                        let new_char = match char_info.char {
+                            'a' => 'á',
+                            'e' => 'é',
+                            'i' => 'í',
+                            'o' => 'ó',
+                            'u' => 'ú',
+                            'ı' => 'í',
+                            _ => char_info.char,
+                        };
+                        char_info.char = new_char;
                     }
-                    current_word_chars.clear();
+                    tilde = false;
+                    current_word_chars.push(char_info);
+                } else {
+                    if !current_word_chars.is_empty() {
+                        if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
+                            words.push(word);
+                        }
+                        current_word_chars.clear();
+                    }
                 }
             }
         }

@@ -6,7 +6,7 @@ use crate::text_map::word_info::{LineInfo, WordInfo};
 const LINE_GROUPING_THRESHOLD: f64 = 0.5;
 
 #[derive(Debug, Clone)]
-enum TextToken {
+pub enum TextToken {
     WordInfo(WordInfo),
     CharData(CharData),
 }
@@ -46,21 +46,51 @@ impl TextToken {
             TextToken::CharData(char_data) => char_data.line_index = line_index,
         };
     }
+
+    /// Returns the text content of the token
+    pub fn text(&self) -> String {
+        match self {
+            TextToken::WordInfo(word) => word.text.clone(),
+            TextToken::CharData(char_data) => char_data.char.to_string(),
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            TextToken::CharData(char) => match char.spacing {
+                CharSpacing::NoSpaces => self.text(),
+                CharSpacing::LeftSpace => " ".to_string() + &self.text(),
+                CharSpacing::RightSpace => self.text(), // !TODO fix this..
+                CharSpacing::BothSpaces => " ".to_string() + &self.text() + " ",
+            },
+            // Should add spacing to words.. but maybe i think it all wrong
+            TextToken::WordInfo(_word) => " ".to_string() + &self.text(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CharSpacing {
+    NoSpaces,
+    LeftSpace,
+    RightSpace,
+    BothSpaces,
 }
 
 /// Internal struct for character extraction
 #[derive(Debug, Clone, Copy)]
-struct CharData {
+pub struct CharData {
     char: char,
     index: usize,
     bounds: PdfRect,
     center_x: f64,
     center_y: f64,
     line_index: usize,
+    pub spacing: CharSpacing,
 }
 
 impl CharData {
-    pub fn new(c: char, index: usize, bounds: PdfRect) -> Self {
+    pub fn new(c: char, index: usize, bounds: PdfRect, spacing: CharSpacing) -> Self {
         let center_x = (bounds.left().value as f64 + bounds.right().value as f64) / 2.0;
         let center_y = (bounds.bottom().value as f64 + bounds.top().value as f64) / 2.0;
 
@@ -71,6 +101,7 @@ impl CharData {
             center_x,
             center_y,
             line_index: 0,
+            spacing,
         }
     }
 }
@@ -106,9 +137,10 @@ impl PageTextMap {
             .map(|b| b.bounds)
             .unwrap_or(media_box);
 
-        for char_obj in chars.iter() {
+        for (i, char_obj) in chars.iter().enumerate() {
             if let (Some(unicode), Ok(bounds)) = (char_obj.unicode_char(), char_obj.tight_bounds())
             {
+                let spacing = Self::get_char_spacing(i, &chars);
                 // Fix bounds if any
                 let bounds = PdfRect::new(
                     PdfPoints::new(bounds.bottom().value - crop_box.bottom().value),
@@ -124,7 +156,12 @@ impl PageTextMap {
                 //     bounds.bottom().value
                 // );
 
-                char_data.push(CharData::new(unicode, char_obj.index() as usize, bounds));
+                char_data.push(CharData::new(
+                    unicode,
+                    char_obj.index() as usize,
+                    bounds,
+                    spacing,
+                ));
             }
         }
 
@@ -162,6 +199,29 @@ impl PageTextMap {
             page_height,
         });
         word
+    }
+
+    fn get_char_spacing(i: usize, chars: &PdfPageTextChars) -> CharSpacing {
+        // Get neighboring characters
+        let (prev_char, next_char) = {
+            let prev = chars
+                .get(i.wrapping_sub(1))
+                .and_then(|c| c.unicode_char().ok_or(PdfiumError::CharIndexOutOfBounds));
+            let next = chars
+                .get(i + 1)
+                .and_then(|c| c.unicode_char().ok_or(PdfiumError::CharIndexOutOfBounds));
+            (prev, next)
+        };
+        let has_left_space = prev_char.map_or(false, |c| c == ' ');
+        let has_right_space = next_char.map_or(false, |c| c == ' ');
+
+        let spacing = match (has_left_space, has_right_space) {
+            (false, false) => CharSpacing::NoSpaces,
+            (true, false) => CharSpacing::LeftSpace,
+            (false, true) => CharSpacing::RightSpace,
+            (true, true) => CharSpacing::BothSpaces,
+        };
+        return spacing;
     }
 
     /// Extract words from character data
@@ -311,6 +371,11 @@ impl PageTextMap {
                 }
                 _ => {
                     // New line
+                    // !TODO Fix thissss
+                    if let TextToken::CharData(_char) = words[word_idx] {
+                        words[word_idx].set_line_index(current_line_idx);
+                        continue;
+                    }
                     if current_line_y.is_some() {
                         current_line_idx += 1;
                     }

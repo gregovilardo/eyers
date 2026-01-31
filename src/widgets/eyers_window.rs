@@ -15,6 +15,8 @@ use crate::modes::{
     AppMode, KeyAction, WordCursor, handle_normal_mode_key, handle_visual_mode_key,
 };
 use crate::services::pdf_text::calculate_picture_offset;
+use crate::text_map::page_text_map::CharSpacing;
+use crate::text_map::page_text_map::TextToken;
 use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::{EyersHeaderBar, HighlightRect, PdfView, TocPanel, TranslationPanel};
 
@@ -798,7 +800,7 @@ impl EyersWindow {
 
                         for idx in 0..text_map.word_count() {
                             if let Some(word) = text_map.get_word(idx) {
-                                let distance = (word.center_y - target_pdf_y).abs();
+                                let distance = (word.center_y() - target_pdf_y).abs();
                                 if distance < best_distance {
                                     best_distance = distance;
                                     best_word_idx = Some(idx);
@@ -901,7 +903,7 @@ impl EyersWindow {
         if let Some(ref cache) = *cache {
             if let Some(text_map) = cache.get(cursor.page_index) {
                 if let Some(word) = text_map.get_word(cursor.word_index) {
-                    println!("  -> Word: '{}' (line {})", word.text, word.line_index);
+                    println!("  -> Word: '{}' (line {})", word.text(), word.line_index());
                 }
             }
         }
@@ -962,7 +964,7 @@ impl EyersWindow {
                 if let Some(word) = text_map.get_word(cursor.word_index) {
                     let x_offset = get_x_offset(cursor.page_index);
                     let rect = HighlightRect::from_pdf_bounds(
-                        &word.bounds,
+                        word.bounds(),
                         text_map.page_width,
                         text_map.page_height,
                         x_offset,
@@ -992,7 +994,7 @@ impl EyersWindow {
                     for idx in first.word_index..=last.word_index {
                         if let Some(word) = text_map.get_word(idx) {
                             let rect = HighlightRect::from_pdf_bounds(
-                                &word.bounds,
+                                word.bounds(),
                                 text_map.page_width,
                                 text_map.page_height,
                                 x_offset,
@@ -1014,7 +1016,7 @@ impl EyersWindow {
                     for idx in first.word_index..text_map.word_count() {
                         if let Some(word) = text_map.get_word(idx) {
                             let rect = HighlightRect::from_pdf_bounds(
-                                &word.bounds,
+                                word.bounds(),
                                 text_map.page_width,
                                 text_map.page_height,
                                 x_offset,
@@ -1036,7 +1038,7 @@ impl EyersWindow {
                         for idx in 0..text_map.word_count() {
                             if let Some(word) = text_map.get_word(idx) {
                                 let rect = HighlightRect::from_pdf_bounds(
-                                    &word.bounds,
+                                    word.bounds(),
                                     text_map.page_width,
                                     text_map.page_height,
                                     x_offset,
@@ -1058,7 +1060,7 @@ impl EyersWindow {
                     for idx in 0..=last.word_index {
                         if let Some(word) = text_map.get_word(idx) {
                             let rect = HighlightRect::from_pdf_bounds(
-                                &word.bounds,
+                                word.bounds(),
                                 text_map.page_width,
                                 text_map.page_height,
                                 x_offset,
@@ -1131,7 +1133,7 @@ impl EyersWindow {
         let render_width =
             crate::services::pdf_text::get_render_width_for_zoom(imp.pdf_view.zoom_level());
         let scale = render_width as f64 / text_map.page_width;
-        let word_y_screen = page_top + (text_map.page_height - word.center_y) * scale;
+        let word_y_screen = page_top + (text_map.page_height - word.center_y()) * scale;
 
         // Get viewport info
         let vadj = scrolled.vadjustment();
@@ -1176,7 +1178,7 @@ impl EyersWindow {
         };
 
         // Show definition using existing mechanism
-        let word_text = word.text.clone();
+        let word_text = word.text();
         println!("Definition for: {}", word_text);
 
         // Use the definition popover
@@ -1187,8 +1189,8 @@ impl EyersWindow {
                 crate::services::pdf_text::get_render_width_for_zoom(imp.pdf_view.zoom_level());
             let scale = render_width as f64 / text_map.page_width;
             let x_offset = calculate_picture_offset(pic);
-            let screen_x = word.center_x * scale + x_offset;
-            let screen_y = (text_map.page_height - word.center_y) * scale;
+            let screen_x = word.center_x() * scale + x_offset;
+            let screen_y = (text_map.page_height - word.center_y()) * scale;
 
             let popover = crate::widgets::DefinitionPopover::new();
             popover.show_at(pic, screen_x, screen_y);
@@ -1219,7 +1221,7 @@ impl EyersWindow {
 
                 for idx in word_start..=word_end {
                     if let Some(word) = text_map.get_word(idx) {
-                        text_parts.push(word.text.clone());
+                        text_parts.push(word.text());
                     }
                 }
             }
@@ -1235,7 +1237,7 @@ impl EyersWindow {
             if let Some(text_map) = cache.get(first.page_index) {
                 for idx in first.word_index..text_map.word_count() {
                     if let Some(word) = text_map.get_word(idx) {
-                        text_parts.push(word.text.clone());
+                        text_parts.push(word.text());
                     }
                 }
             }
@@ -1245,7 +1247,7 @@ impl EyersWindow {
                 if let Some(text_map) = cache.get(page_idx) {
                     for idx in 0..text_map.word_count() {
                         if let Some(word) = text_map.get_word(idx) {
-                            text_parts.push(word.text.clone());
+                            text_parts.push(word.text());
                         }
                     }
                 }
@@ -1255,7 +1257,7 @@ impl EyersWindow {
             if let Some(text_map) = cache.get(last.page_index) {
                 for idx in 0..=last.word_index {
                     if let Some(word) = text_map.get_word(idx) {
-                        text_parts.push(word.text.clone());
+                        text_parts.push(word.text());
                     }
                 }
             }
@@ -1348,7 +1350,7 @@ impl EyersWindow {
         start: WordCursor,
         end: WordCursor,
     ) -> String {
-        let mut text_parts: Vec<String> = Vec::new();
+        let mut text_parts: Vec<&TextToken> = Vec::new();
 
         if start.page_index == end.page_index {
             // Same page
@@ -1358,7 +1360,7 @@ impl EyersWindow {
 
                 for idx in word_start..=word_end {
                     if let Some(word) = text_map.get_word(idx) {
-                        text_parts.push(word.text.clone());
+                        text_parts.push(word);
                     }
                 }
             }
@@ -1374,7 +1376,7 @@ impl EyersWindow {
             if let Some(text_map) = cache.get(first.page_index) {
                 for idx in first.word_index..text_map.word_count() {
                     if let Some(word) = text_map.get_word(idx) {
-                        text_parts.push(word.text.clone());
+                        text_parts.push(word);
                     }
                 }
             }
@@ -1384,7 +1386,7 @@ impl EyersWindow {
                 if let Some(text_map) = cache.get(page_idx) {
                     for idx in 0..text_map.word_count() {
                         if let Some(word) = text_map.get_word(idx) {
-                            text_parts.push(word.text.clone());
+                            text_parts.push(word);
                         }
                     }
                 }
@@ -1394,13 +1396,14 @@ impl EyersWindow {
             if let Some(text_map) = cache.get(last.page_index) {
                 for idx in 0..=last.word_index {
                     if let Some(word) = text_map.get_word(idx) {
-                        text_parts.push(word.text.clone());
+                        text_parts.push(word);
                     }
                 }
             }
         }
 
-        text_parts.join(" ")
+        let res: Vec<String> = text_parts.iter().map(|token| token.to_string()).collect();
+        res.join("")
     }
 
     /// Show a brief toast notification when text is copied

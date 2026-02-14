@@ -58,3 +58,26 @@
 .pdf-placeholder {
     background-color: #e0e0e0;
 }
+
+/* Annotation Panel */
+.annotation-panel {
+    background-color: @window_bg_color;
+    border-top: 1px solid @borders;
+}
+
+.annotation-selected-text {
+    font-style: italic;
+    color: @accent_color;
+}
+
+.annotation-input {
+    border: 1px solid @borders;
+    border-radius: 4px;
+    padding: 8px;
+    background-color: @view_bg_color;
+}
+
+.annotation-scroll {
+    border: 1px solid @borders;
+    border-radius: 4px;
+}

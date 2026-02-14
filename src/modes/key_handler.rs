@@ -24,23 +24,47 @@ pub enum KeyAction {
     ScrollTOC(ScrollDir),
     SelectChapter,
 
-    ScrollViewport { x_percent: f64, y_percent: f64 },
+    ScrollViewport {
+        x_percent: f64,
+        y_percent: f64,
+    },
     EnterVisual,
     ExitVisual,
-    CursorMoved { cursor: WordCursor },
+    CursorMoved {
+        cursor: WordCursor,
+    },
     ToggleSelection,
     ClearSelection,
-    ShowDefinition { cursor: WordCursor },
-    Translate { start: WordCursor, end: WordCursor },
-    CopyToClipboard { start: WordCursor, end: WordCursor },
+    ShowDefinition {
+        cursor: WordCursor,
+    },
+    Translate {
+        start: WordCursor,
+        end: WordCursor,
+    },
+    CopyToClipboard {
+        start: WordCursor,
+        end: WordCursor,
+    },
+    /// Open annotation panel for current cursor/selection
+    Annotate {
+        cursor: WordCursor,
+        selection: Option<(WordCursor, WordCursor)>,
+    },
     ScrollWithGG,
     ScrollToEnd,
     PendingG,
     PendingForward,
     PendingBackward,
-    PendingNumber { number: u32 },
-    FindForward { letter: char },
-    FindBackward { letter: char },
+    PendingNumber {
+        number: u32,
+    },
+    FindForward {
+        letter: char,
+    },
+    FindBackward {
+        letter: char,
+    },
     ZoomIn,
     ZoomOut,
 }
@@ -305,6 +329,14 @@ pub fn handle_visual_mode_key(
                     end: cursor,
                 })
             }
+        }
+
+        gdk::Key::a => {
+            // Annotate: works with selection or just cursor position
+            Some(KeyAction::Annotate {
+                cursor,
+                selection: mode.selection_range(),
+            })
         }
 
         gdk::Key::plus | gdk::Key::equal => Some(KeyAction::ZoomIn),

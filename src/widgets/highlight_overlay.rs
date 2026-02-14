@@ -55,6 +55,8 @@ pub struct PageHighlights {
     pub cursor: Option<HighlightRect>,
     /// Selection highlights (multiple words, one rect per word)
     pub selection: Vec<HighlightRect>,
+    /// Annotation highlights (light yellow, persistent)
+    pub annotations: Vec<HighlightRect>,
 }
 
 mod imp {
@@ -110,7 +112,12 @@ impl HighlightOverlay {
     fn draw(&self, cr: &gtk::cairo::Context) {
         let highlights = self.imp().highlights.borrow();
 
-        // Draw selection highlights first (behind cursor)
+        // Draw annotation highlights first (behind everything)
+        for rect in &highlights.annotations {
+            self.draw_annotation_rect(cr, rect);
+        }
+
+        // Draw selection highlights (behind cursor)
         for rect in &highlights.selection {
             self.draw_selection_rect(cr, rect);
         }
@@ -145,6 +152,13 @@ impl HighlightOverlay {
         let _ = cr.fill();
     }
 
+    fn draw_annotation_rect(&self, cr: &gtk::cairo::Context, rect: &HighlightRect) {
+        // Light yellow with ~30% opacity for annotations
+        cr.set_source_rgba(1.0, 0.95, 0.4, 0.3);
+        cr.rectangle(rect.x, rect.y, rect.width, rect.height);
+        let _ = cr.fill();
+    }
+
     /// Set the cursor highlight
     pub fn set_cursor(&self, rect: Option<HighlightRect>) {
         self.imp().highlights.borrow_mut().cursor = rect;
@@ -162,6 +176,16 @@ impl HighlightOverlay {
         let mut highlights = self.imp().highlights.borrow_mut();
         highlights.cursor = None;
         highlights.selection.clear();
+        // Note: annotations are NOT cleared here - they persist
+        self.queue_draw();
+    }
+
+    /// Clear all highlights including annotations
+    pub fn clear_all(&self) {
+        let mut highlights = self.imp().highlights.borrow_mut();
+        highlights.cursor = None;
+        highlights.selection.clear();
+        highlights.annotations.clear();
         self.queue_draw();
     }
 
@@ -170,6 +194,27 @@ impl HighlightOverlay {
         let mut highlights = self.imp().highlights.borrow_mut();
         highlights.cursor = cursor;
         highlights.selection = selection;
+        drop(highlights);
+        self.queue_draw();
+    }
+
+    /// Set the annotation highlights
+    pub fn set_annotations(&self, rects: Vec<HighlightRect>) {
+        self.imp().highlights.borrow_mut().annotations = rects;
+        self.queue_draw();
+    }
+
+    /// Update all highlights at once (cursor, selection, and annotations)
+    pub fn set_all_highlights(
+        &self,
+        cursor: Option<HighlightRect>,
+        selection: Vec<HighlightRect>,
+        annotations: Vec<HighlightRect>,
+    ) {
+        let mut highlights = self.imp().highlights.borrow_mut();
+        highlights.cursor = cursor;
+        highlights.selection = selection;
+        highlights.annotations = annotations;
         drop(highlights);
         self.queue_draw();
     }

@@ -1,3 +1,4 @@
+mod annotation_panel;
 mod definition_popover;
 mod eyers_header_bar;
 mod eyers_window;
@@ -7,6 +8,7 @@ mod settings_window;
 mod toc_panel;
 mod translation_panel;
 
+pub use annotation_panel::AnnotationPanel;
 pub use definition_popover::DefinitionPopover;
 pub use eyers_header_bar::EyersHeaderBar;
 pub use eyers_window::EyersWindow;

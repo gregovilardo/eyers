@@ -14,11 +14,13 @@ use crate::modes::key_handler::ScrollDir;
 use crate::modes::{
     handle_normal_mode_key, handle_visual_mode_key, AppMode, KeyAction, WordCursor,
 };
+use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
 use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
 use crate::widgets::{
-    EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, TocPanel, TranslationPanel,
+    AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, TocPanel,
+    TranslationPanel,
 };
 
 const DEFAULT_VIEWPORT_OFFSET: f64 = 0.2;
@@ -32,6 +34,7 @@ mod imp {
         pub toc_panel: TocPanel,
         pub scrolled_window: RefCell<Option<ScrolledWindow>>,
         pub translation_panel: TranslationPanel,
+        pub annotation_panel: AnnotationPanel,
         pub pdfium: RefCell<Option<&'static Pdfium>>,
         pub paned: RefCell<Option<Paned>>,
         pub app_mode: RefCell<AppMode>,
@@ -44,6 +47,12 @@ mod imp {
         pub pending_number: Cell<u32>,
         /// Dictionary language setting
         pub dictionary_language: Cell<Language>,
+        /// Current PDF file path (for annotations)
+        pub current_pdf_path: RefCell<Option<String>>,
+        /// Loaded annotations for the current PDF
+        pub annotations: RefCell<Vec<Annotation>>,
+        /// Pending annotation state: (start, end) cursors being annotated
+        pub pending_annotation: RefCell<Option<(WordCursor, WordCursor)>>,
     }
 
     impl Default for EyersWindow {
@@ -63,6 +72,7 @@ mod imp {
                 toc_panel: TocPanel::new(),
                 scrolled_window: RefCell::new(None),
                 translation_panel: TranslationPanel::new(),
+                annotation_panel: AnnotationPanel::new(),
                 pdfium: RefCell::new(None),
                 paned: RefCell::new(None),
                 app_mode: RefCell::new(AppMode::default()),
@@ -72,6 +82,9 @@ mod imp {
                 keyaction_state: Cell::new(KeyAction::Empty),
                 pending_number: Cell::new(0),
                 dictionary_language: Cell::new(Language::default()),
+                current_pdf_path: RefCell::new(None),
+                annotations: RefCell::new(Vec::new()),
+                pending_annotation: RefCell::new(None),
             }
         }
     }
@@ -174,6 +187,9 @@ impl EyersWindow {
         imp.translation_panel.set_visible(false);
         main_box.append(&imp.translation_panel);
 
+        imp.annotation_panel.set_visible(false);
+        main_box.append(&imp.annotation_panel);
+
         // Set up toast notification
         self.setup_toast();
 
@@ -185,6 +201,8 @@ impl EyersWindow {
         self.set_child(Some(&overlay));
 
         self.setup_translation_panel();
+        self.setup_annotation_panel();
+        self.setup_annotate_button();
         self.setup_toc_panel();
         self.setup_keyboard_controller();
         self.setup_scroll_tracking();
@@ -491,6 +509,11 @@ impl EyersWindow {
 
             KeyAction::CopyToClipboard { start, end } => {
                 self.copy_range_to_clipboard(start, end);
+                true
+            }
+
+            KeyAction::Annotate { cursor, selection } => {
+                self.handle_annotate_action(cursor, selection);
                 true
             }
 
@@ -902,8 +925,13 @@ impl EyersWindow {
 
     /// Update the mode label in the header bar
     fn update_mode_display(&self) {
-        let mode = self.imp().app_mode.borrow();
-        self.imp().header_bar.set_mode_text(mode.display_name());
+        let imp = self.imp();
+        let mode = imp.app_mode.borrow();
+        imp.header_bar.set_mode_text(mode.display_name());
+
+        // Enable/disable annotate button based on mode
+        let is_visual = mode.is_visual();
+        imp.header_bar.annotate_button().set_sensitive(is_visual);
     }
 
     /// Debug helper: print the word at cursor position
@@ -1545,8 +1573,16 @@ impl EyersWindow {
             return;
         }
 
+        // Store the PDF path for annotations
+        self.imp()
+            .current_pdf_path
+            .replace(Some(path.to_string_lossy().to_string()));
+
         self.init_text_cache();
         self.extract_and_populate_bookmarks();
+
+        // Load annotations for this PDF
+        self.reload_annotations();
 
         // Reset to Normal mode when loading new PDF
         {
@@ -1557,6 +1593,14 @@ impl EyersWindow {
         self.pdf_view().set_cursor(None);
         self.pdf_view().clear_selection();
         self.pdf_view().clear_all_highlights();
+
+        // Update annotation highlights after a brief delay to ensure pages are rendered
+        let window_weak = self.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(window) = window_weak.upgrade() {
+                window.update_annotation_highlights();
+            }
+        });
     }
 
     fn setup_page_indicator_label(&self) {
@@ -1608,5 +1652,400 @@ impl EyersWindow {
     }
     pub fn keyaction_state(&self) -> KeyAction {
         self.imp().keyaction_state.get()
+    }
+
+    // ============ Annotation Methods ============
+
+    fn setup_annotation_panel(&self) {
+        let imp = self.imp();
+
+        // Handle save
+        let window_weak = self.downgrade();
+        imp.annotation_panel.connect_closure(
+            "save-requested",
+            false,
+            glib::closure_local!(move |_panel: &AnnotationPanel, note: &str| {
+                if let Some(window) = window_weak.upgrade() {
+                    window.save_current_annotation(note);
+                }
+            }),
+        );
+
+        // Handle cancel
+        let window_weak = self.downgrade();
+        imp.annotation_panel.connect_closure(
+            "cancel-requested",
+            false,
+            glib::closure_local!(move |_panel: &AnnotationPanel| {
+                if let Some(window) = window_weak.upgrade() {
+                    window.close_annotation_panel();
+                }
+            }),
+        );
+
+        // Handle delete
+        let window_weak = self.downgrade();
+        imp.annotation_panel.connect_closure(
+            "delete-requested",
+            false,
+            glib::closure_local!(move |_panel: &AnnotationPanel, id: i64| {
+                if let Some(window) = window_weak.upgrade() {
+                    window.delete_annotation(id);
+                }
+            }),
+        );
+    }
+
+    fn setup_annotate_button(&self) {
+        let window_weak = self.downgrade();
+        self.imp()
+            .header_bar
+            .annotate_button()
+            .connect_clicked(move |_| {
+                if let Some(window) = window_weak.upgrade() {
+                    // Trigger annotation from button click
+                    let imp = window.imp();
+                    let mode = imp.app_mode.borrow();
+                    if let Some(cursor) = mode.cursor() {
+                        let selection = mode.selection_range();
+                        drop(mode);
+                        window.handle_annotate_action(cursor, selection);
+                    }
+                }
+            });
+    }
+
+    /// Handle the annotate action (from 'a' key or button)
+    fn handle_annotate_action(
+        &self,
+        cursor: WordCursor,
+        selection: Option<(WordCursor, WordCursor)>,
+    ) {
+        let imp = self.imp();
+
+        // If annotation panel is already visible, treat this as cancel/toggle
+        if imp.annotation_panel.is_visible() {
+            self.close_annotation_panel();
+            return;
+        }
+
+        let pdf_path = match imp.current_pdf_path.borrow().as_ref() {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        // Determine the range to annotate
+        let (start, end) = selection.unwrap_or((cursor, cursor));
+
+        // Check if there's an existing annotation at cursor position (for editing)
+        // Also check for overlapping annotations with the selection
+        let existing_annotation = if selection.is_some() {
+            // Selection mode: check for overlaps
+            annotations::find_overlapping_annotations(
+                &pdf_path,
+                start.page_index,
+                start.word_index,
+                end.page_index,
+                end.word_index,
+            )
+            .ok()
+            .and_then(|v| v.into_iter().next())
+        } else {
+            // No selection: check if cursor is on an existing annotation
+            annotations::find_annotation_at_position(
+                &pdf_path,
+                cursor.page_index,
+                cursor.word_index,
+            )
+            .ok()
+            .flatten()
+        };
+
+        // Get the selected text
+        let selected_text = {
+            let cache = imp.text_cache.borrow();
+            match cache.as_ref() {
+                Some(c) => self.extract_text_range(c, start, end),
+                None => return,
+            }
+        };
+
+        // Store the pending annotation range
+        imp.pending_annotation.replace(Some((start, end)));
+
+        // Setup the panel
+        imp.annotation_panel.set_selected_text(&selected_text);
+
+        if let Some(ann) = existing_annotation {
+            // Editing existing annotation
+            imp.annotation_panel.set_annotation_id(Some(ann.id));
+            imp.annotation_panel.set_note(&ann.note);
+        } else {
+            // New annotation
+            imp.annotation_panel.set_annotation_id(None);
+            imp.annotation_panel.set_note("");
+        }
+
+        // Show panel and focus input
+        imp.annotation_panel.set_visible(true);
+        imp.annotation_panel.focus_input();
+    }
+
+    fn save_current_annotation(&self, note: &str) {
+        let imp = self.imp();
+
+        let pdf_path = match imp.current_pdf_path.borrow().as_ref() {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        let (start, end) = match imp.pending_annotation.borrow().as_ref() {
+            Some((s, e)) => (*s, *e),
+            None => return,
+        };
+
+        // Get the selected text
+        let selected_text = {
+            let cache = imp.text_cache.borrow();
+            match cache.as_ref() {
+                Some(c) => self.extract_text_range(c, start, end),
+                None => return,
+            }
+        };
+
+        let annotation_id = imp.annotation_panel.annotation_id();
+
+        // Save or update
+        let result = if let Some(id) = annotation_id {
+            // Update existing
+            annotations::update_annotation(
+                id,
+                start.page_index,
+                start.word_index,
+                end.page_index,
+                end.word_index,
+                &selected_text,
+                note,
+            )
+            .map(|_| id)
+        } else {
+            // Create new
+            annotations::save_annotation(
+                &pdf_path,
+                start.page_index,
+                start.word_index,
+                end.page_index,
+                end.word_index,
+                &selected_text,
+                note,
+            )
+        };
+
+        match result {
+            Ok(_) => {
+                println!("Annotation saved successfully");
+                self.close_annotation_panel();
+                self.reload_annotations();
+                self.update_annotation_highlights();
+            }
+            Err(e) => {
+                eprintln!("Failed to save annotation: {}", e);
+            }
+        }
+    }
+
+    fn delete_annotation(&self, id: i64) {
+        match annotations::delete_annotation(id) {
+            Ok(_) => {
+                println!("Annotation deleted successfully");
+                self.close_annotation_panel();
+                self.reload_annotations();
+                self.update_annotation_highlights();
+            }
+            Err(e) => {
+                eprintln!("Failed to delete annotation: {}", e);
+            }
+        }
+    }
+
+    fn close_annotation_panel(&self) {
+        let imp = self.imp();
+        imp.annotation_panel.set_visible(false);
+        imp.annotation_panel.clear();
+        imp.pending_annotation.replace(None);
+    }
+
+    /// Reload annotations from the database for the current PDF
+    fn reload_annotations(&self) {
+        let imp = self.imp();
+
+        let pdf_path = match imp.current_pdf_path.borrow().as_ref() {
+            Some(p) => p.clone(),
+            None => {
+                imp.annotations.replace(Vec::new());
+                return;
+            }
+        };
+
+        match annotations::load_annotations_for_pdf(&pdf_path) {
+            Ok(anns) => {
+                println!("Loaded {} annotations", anns.len());
+                imp.annotations.replace(anns);
+            }
+            Err(e) => {
+                eprintln!("Failed to load annotations: {}", e);
+                imp.annotations.replace(Vec::new());
+            }
+        }
+    }
+
+    /// Update annotation highlights on all pages
+    fn update_annotation_highlights(&self) {
+        let imp = self.imp();
+
+        let annotations = imp.annotations.borrow();
+        if annotations.is_empty() {
+            // Clear all annotation highlights
+            for overlay in imp.pdf_view.highlight_overlays().iter() {
+                overlay.set_annotations(Vec::new());
+            }
+            return;
+        }
+
+        // We need mutable access to cache and document access
+        let doc_borrow = imp.pdf_view.document();
+        let doc = match doc_borrow.as_ref() {
+            Some(d) => d,
+            None => return,
+        };
+
+        let mut cache = imp.text_cache.borrow_mut();
+        let cache = match cache.as_mut() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let page_pictures = imp.pdf_view.page_pictures();
+        let render_width =
+            crate::services::pdf_text::get_render_width_for_zoom(imp.pdf_view.zoom_level());
+
+        // Build annotation highlights per page
+        let mut page_ann_rects: std::collections::HashMap<usize, Vec<HighlightRect>> =
+            std::collections::HashMap::new();
+
+        for ann in annotations.iter() {
+            // Handle same-page and cross-page annotations
+            if ann.start_page == ann.end_page {
+                // Same page - use get_or_build to ensure the text map exists
+                if let Some(text_map) = cache.get_or_build(ann.start_page, doc) {
+                    let x_offset = page_pictures
+                        .get(ann.start_page)
+                        .map(|pic| calculate_picture_offset(pic))
+                        .unwrap_or(0.0);
+
+                    for idx in ann.start_word..=ann.end_word {
+                        if let Some(word) = text_map.get_word(idx) {
+                            let rect = HighlightRect::from_pdf_bounds(
+                                &word.bounds,
+                                text_map.page_width,
+                                text_map.page_height,
+                                x_offset,
+                                render_width,
+                            );
+                            page_ann_rects
+                                .entry(ann.start_page)
+                                .or_insert_with(Vec::new)
+                                .push(rect);
+                        }
+                    }
+                }
+            } else {
+                // Cross-page annotation
+                // First page
+                if let Some(text_map) = cache.get_or_build(ann.start_page, doc) {
+                    let x_offset = page_pictures
+                        .get(ann.start_page)
+                        .map(|pic| calculate_picture_offset(pic))
+                        .unwrap_or(0.0);
+
+                    for idx in ann.start_word..text_map.word_count() {
+                        if let Some(word) = text_map.get_word(idx) {
+                            let rect = HighlightRect::from_pdf_bounds(
+                                &word.bounds,
+                                text_map.page_width,
+                                text_map.page_height,
+                                x_offset,
+                                render_width,
+                            );
+                            page_ann_rects
+                                .entry(ann.start_page)
+                                .or_insert_with(Vec::new)
+                                .push(rect);
+                        }
+                    }
+                }
+
+                // Middle pages
+                for page_idx in (ann.start_page + 1)..ann.end_page {
+                    if let Some(text_map) = cache.get_or_build(page_idx, doc) {
+                        let x_offset = page_pictures
+                            .get(page_idx)
+                            .map(|pic| calculate_picture_offset(pic))
+                            .unwrap_or(0.0);
+
+                        for idx in 0..text_map.word_count() {
+                            if let Some(word) = text_map.get_word(idx) {
+                                let rect = HighlightRect::from_pdf_bounds(
+                                    &word.bounds,
+                                    text_map.page_width,
+                                    text_map.page_height,
+                                    x_offset,
+                                    render_width,
+                                );
+                                page_ann_rects
+                                    .entry(page_idx)
+                                    .or_insert_with(Vec::new)
+                                    .push(rect);
+                            }
+                        }
+                    }
+                }
+
+                // Last page
+                if let Some(text_map) = cache.get_or_build(ann.end_page, doc) {
+                    let x_offset = page_pictures
+                        .get(ann.end_page)
+                        .map(|pic| calculate_picture_offset(pic))
+                        .unwrap_or(0.0);
+
+                    for idx in 0..=ann.end_word {
+                        if let Some(word) = text_map.get_word(idx) {
+                            let rect = HighlightRect::from_pdf_bounds(
+                                &word.bounds,
+                                text_map.page_width,
+                                text_map.page_height,
+                                x_offset,
+                                render_width,
+                            );
+                            page_ann_rects
+                                .entry(ann.end_page)
+                                .or_insert_with(Vec::new)
+                                .push(rect);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply annotation highlights to overlays
+        let overlays = imp.pdf_view.highlight_overlays();
+        for (page_index, overlay) in overlays.iter().enumerate() {
+            let rects = page_ann_rects.remove(&page_index).unwrap_or_default();
+            overlay.set_annotations(rects);
+        }
+    }
+
+    pub fn annotation_panel(&self) -> &AnnotationPanel {
+        &self.imp().annotation_panel
     }
 }

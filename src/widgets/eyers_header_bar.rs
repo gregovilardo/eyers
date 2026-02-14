@@ -14,6 +14,7 @@ mod imp {
         pub header_bar: HeaderBar,
         pub open_button: Button,
         pub settings_button: Button,
+        pub annotate_button: Button,
         pub definitions_toggle: ToggleButton,
         pub translate_toggle: ToggleButton,
         pub mode_label: Label,
@@ -90,6 +91,13 @@ impl EyersHeaderBar {
         imp.definitions_toggle.set_active(false);
         imp.header_bar.pack_end(&imp.definitions_toggle);
 
+        // Annotate button (note-taking icon)
+        imp.annotate_button.set_icon_name("document-edit-symbolic");
+        imp.annotate_button
+            .set_tooltip_text(Some("Add annotation (a)"));
+        imp.annotate_button.set_sensitive(false); // Disabled until in visual mode with selection
+        imp.header_bar.pack_end(&imp.annotate_button);
+
         // Bind toggle buttons to properties (bidirectional)
         imp.definitions_toggle
             .bind_property("active", self, "definitions-enabled")
@@ -138,6 +146,10 @@ impl EyersHeaderBar {
 
     pub fn settings_button(&self) -> &Button {
         &self.imp().settings_button
+    }
+
+    pub fn annotate_button(&self) -> &Button {
+        &self.imp().annotate_button
     }
 
     pub fn definitions_toggle(&self) -> &ToggleButton {

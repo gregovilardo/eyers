@@ -1,5 +1,5 @@
-use glib::Properties;
 use glib::subclass::Signal;
+use glib::Properties;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 
 use crate::modes::WordCursor;
 use crate::services::bookmarks;
+use crate::services::dictionary::Language;
 use crate::services::pdf_text::{
     self, calculate_click_coordinates_with_offset, calculate_page_dimensions,
     calculate_picture_offset, create_render_config_with_zoom, extract_word_at_index,
@@ -57,6 +58,8 @@ mod imp {
         pub definitions_enabled: Cell<bool>,
         #[property(get, set, default = false)]
         pub translate_enabled: Cell<bool>,
+        /// Dictionary language (0=English, 1=Spanish)
+        pub dictionary_language: Cell<Language>,
     }
 
     impl Default for PdfView {
@@ -79,6 +82,7 @@ mod imp {
                 zoom_level: Cell::new(1.0),
                 definitions_enabled: Cell::new(false),
                 translate_enabled: Cell::new(false),
+                dictionary_language: Cell::new(Language::default()),
             }
         }
     }
@@ -456,7 +460,7 @@ impl PdfView {
         if let Some(word) = extract_word_at_index(&full_text, char_idx) {
             let popover = DefinitionPopover::new();
             popover.show_at(picture, click.screen_x, click.screen_y);
-            popover.fetch_and_display(word.original, word.lowercase);
+            popover.fetch_and_display(word.original, word.lowercase, self.dictionary_language());
 
             self.imp().current_popover.replace(Some(popover));
         }
@@ -777,6 +781,16 @@ impl PdfView {
         let clamped_zoom = zoom.clamp(0.5, 3.0);
         self.imp().zoom_level.set(clamped_zoom);
         self.update_page_sizes_for_zoom();
+    }
+
+    /// Get the current dictionary language
+    pub fn dictionary_language(&self) -> Language {
+        self.imp().dictionary_language.get()
+    }
+
+    /// Set the dictionary language
+    pub fn set_dictionary_language(&self, lang: Language) {
+        self.imp().dictionary_language.set(lang);
     }
 
     /// Update all page sizes for the new zoom level (fast - no rendering)

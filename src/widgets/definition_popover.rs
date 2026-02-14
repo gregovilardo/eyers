@@ -5,6 +5,7 @@ use gtk::{Box, Button, Label, Orientation, PolicyType, Popover, ScrolledWindow};
 use std::cell::RefCell;
 
 use crate::services::dictionary;
+use crate::services::dictionary::Language;
 
 const POPOVER_WIDTH: i32 = 500;
 const POPOVER_HEIGHT: i32 = 200;
@@ -108,11 +109,11 @@ impl DefinitionPopover {
         self.popup();
     }
 
-    pub fn fetch_and_display(&self, original_word: String, lookup_word: String) {
+    pub fn fetch_and_display(&self, original_word: String, lookup_word: String, lang: Language) {
         let (sender, receiver) = std::sync::mpsc::channel::<String>();
 
         std::thread::spawn(move || {
-            let definition = dictionary::fetch_definition(&lookup_word, &original_word)
+            let definition = dictionary::fetch_definition(&lookup_word, &original_word, lang)
                 .unwrap_or_else(|| {
                     format!("Definition for <b>{lookup_word}</b> not found.").to_string()
                 });

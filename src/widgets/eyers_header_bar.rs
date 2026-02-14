@@ -13,6 +13,7 @@ mod imp {
     pub struct EyersHeaderBar {
         pub header_bar: HeaderBar,
         pub open_button: Button,
+        pub settings_button: Button,
         pub definitions_toggle: ToggleButton,
         pub translate_toggle: ToggleButton,
         pub mode_label: Label,
@@ -76,6 +77,11 @@ impl EyersHeaderBar {
         imp.translate_toggle.set_active(false);
         imp.header_bar.pack_end(&imp.translate_toggle);
 
+        // Settings button (gear icon)
+        imp.settings_button.set_icon_name("emblem-system-symbolic");
+        imp.settings_button.set_tooltip_text(Some("Settings"));
+        imp.header_bar.pack_end(&imp.settings_button);
+
         // Definitions toggle button
         imp.definitions_toggle.set_label("Definitions");
         imp.definitions_toggle.set_active(false);
@@ -125,6 +131,10 @@ impl EyersHeaderBar {
 
     pub fn open_button(&self) -> &Button {
         &self.imp().open_button
+    }
+
+    pub fn settings_button(&self) -> &Button {
+        &self.imp().settings_button
     }
 
     pub fn definitions_toggle(&self) -> &ToggleButton {

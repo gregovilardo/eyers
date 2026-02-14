@@ -8,15 +8,18 @@ use pdfium_render::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 
-use crate::modes::key_handler::ScrollDir;
 use crate::modes::key_handler::handle_post_global_key;
 use crate::modes::key_handler::handle_pre_global_key;
+use crate::modes::key_handler::ScrollDir;
 use crate::modes::{
-    AppMode, KeyAction, WordCursor, handle_normal_mode_key, handle_visual_mode_key,
+    handle_normal_mode_key, handle_visual_mode_key, AppMode, KeyAction, WordCursor,
 };
+use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
-use crate::widgets::{EyersHeaderBar, HighlightRect, PdfView, TocPanel, TranslationPanel};
+use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
+use crate::widgets::{
+    EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, TocPanel, TranslationPanel,
+};
 
 const DEFAULT_VIEWPORT_OFFSET: f64 = 0.2;
 
@@ -39,6 +42,8 @@ mod imp {
         pub toast_label: gtk::Label,
         pub keyaction_state: Cell<KeyAction>,
         pub pending_number: Cell<u32>,
+        /// Dictionary language setting
+        pub dictionary_language: Cell<Language>,
     }
 
     impl Default for EyersWindow {
@@ -66,6 +71,7 @@ mod imp {
                 toast_label,
                 keyaction_state: Cell::new(KeyAction::Empty),
                 pending_number: Cell::new(0),
+                dictionary_language: Cell::new(Language::default()),
             }
         }
     }
@@ -125,6 +131,7 @@ impl EyersWindow {
 
         self.set_titlebar(Some(imp.header_bar.widget()));
         self.setup_open_button();
+        self.setup_settings_button();
 
         imp.header_bar
             .bind_property("definitions-enabled", &imp.pdf_view, "definitions-enabled")
@@ -1192,7 +1199,11 @@ impl EyersWindow {
 
             let popover = crate::widgets::DefinitionPopover::new();
             popover.show_at(pic, screen_x, screen_y);
-            popover.fetch_and_display(word_text.clone(), word_text.to_lowercase());
+            popover.fetch_and_display(
+                word_text.clone(),
+                word_text.to_lowercase(),
+                imp.dictionary_language.get(),
+            );
 
             imp.pdf_view.set_current_popover(Some(popover));
         }
@@ -1461,6 +1472,40 @@ impl EyersWindow {
                     window.show_open_dialog();
                 }
             });
+    }
+
+    fn setup_settings_button(&self) {
+        let window_weak = self.downgrade();
+
+        self.imp()
+            .header_bar
+            .settings_button()
+            .connect_clicked(move |_| {
+                if let Some(window) = window_weak.upgrade() {
+                    window.show_settings_window();
+                }
+            });
+    }
+
+    fn show_settings_window(&self) {
+        let settings = SettingsWindow::new(self);
+        settings.set_language(self.imp().dictionary_language.get());
+
+        let window_weak = self.downgrade();
+        settings
+            .language_dropdown()
+            .connect_selected_notify(move |dropdown| {
+                if let Some(window) = window_weak.upgrade() {
+                    let lang = match dropdown.selected() {
+                        1 => Language::Spanish,
+                        _ => Language::English,
+                    };
+                    window.imp().dictionary_language.set(lang);
+                    window.imp().pdf_view.set_dictionary_language(lang);
+                }
+            });
+
+        settings.present();
     }
 
     fn show_open_dialog(&self) {

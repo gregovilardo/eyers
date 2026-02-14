@@ -16,6 +16,7 @@ pub struct WordInfo {
     pub center_y: f64,
     /// Which line this word belongs to (for j/k navigation)
     pub line_index: usize,
+    pub surround_left: Option<String>,
 }
 
 impl WordInfo {
@@ -26,6 +27,7 @@ impl WordInfo {
         char_end: usize,
         bounds: PdfRect,
         line_index: usize,
+        surround_left: Option<String>,
     ) -> Self {
         let center_x = (bounds.left().value as f64 + bounds.right().value as f64) / 2.0;
         let center_y = (bounds.bottom().value as f64 + bounds.top().value as f64) / 2.0;
@@ -38,6 +40,7 @@ impl WordInfo {
             center_x,
             center_y,
             line_index,
+            surround_left,
         }
     }
 }

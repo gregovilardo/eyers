@@ -95,7 +95,8 @@ impl PageTextMap {
         let mut words: Vec<WordInfo> = Vec::new();
         let mut current_word_chars: Vec<&CharData> = Vec::new();
         let mut tilde = false;
-        let mut surround_chars: Vec<char> = Vec::new();
+        let mut surround_left: Option<String>;
+        let mut surround_right: Option<String>;
 
         for char_info in char_data {
             // This is for fixing weirldy formatted spanish pdfs
@@ -119,23 +120,21 @@ impl PageTextMap {
                     current_word_chars.push(char_info);
                 } else {
                     if !current_word_chars.is_empty() {
-                        if let Some(word) =
-                            Self::build_word_from_chars(&current_word_chars, &surround_chars)
-                        {
+                        if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
                             words.push(word);
                         }
                         current_word_chars.clear();
-                        surround_chars.clear();
+                    } else {
+                        surround_left =
+                            surround_left.map_or(Some("nuevo".to_string()), |s| Some(s + " mundo"));
                     }
-                    surround_chars.push(char_info.char);
                 }
             }
         }
-        surround_chars.clear();
 
         // Don't forget the last word
         if !current_word_chars.is_empty() {
-            if let Some(word) = Self::build_word_from_chars(&current_word_chars, &surround_chars) {
+            if let Some(word) = Self::build_word_from_chars(&current_word_chars) {
                 words.push(word);
             }
         }
@@ -144,7 +143,7 @@ impl PageTextMap {
     }
 
     /// Build a WordInfo from a sequence of characters
-    fn build_word_from_chars(chars: &[&CharData], surround_chars: &Vec<char>) -> Option<WordInfo> {
+    fn build_word_from_chars(chars: &[&CharData]) -> Option<WordInfo> {
         if chars.is_empty() {
             return None;
         }
@@ -169,14 +168,7 @@ impl PageTextMap {
         let bounds = PdfRect::new_from_values(min_bottom, min_left, max_top, max_right);
 
         // line_index will be set later during line grouping
-        Some(WordInfo::new(
-            text,
-            char_start,
-            char_end,
-            bounds,
-            0,
-            Some(surround_chars.iter().collect()),
-        ))
+        Some(WordInfo::new(text, char_start, char_end, bounds, 0))
     }
 
     /// Group words into lines based on y-coordinate proximity and reorder into reading order.

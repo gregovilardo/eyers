@@ -1358,6 +1358,11 @@ impl EyersWindow {
 
                 for idx in word_start..=word_end {
                     if let Some(word) = text_map.get_word(idx) {
+                        if let Some(surr_left) = &word.surround_left {
+                            if idx != word_start {
+                                text_parts.push(surr_left.clone());
+                            }
+                        }
                         text_parts.push(word.text.clone());
                     }
                 }
@@ -1400,7 +1405,7 @@ impl EyersWindow {
             }
         }
 
-        text_parts.join(" ")
+        text_parts.join("")
     }
 
     /// Show a brief toast notification when text is copied

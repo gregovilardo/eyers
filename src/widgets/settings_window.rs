@@ -2,7 +2,7 @@ use glib::Properties;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{Box, DropDown, Label, Orientation, StringList, Window};
+use gtk::{Box, Button, DropDown, Label, Orientation, StringList, Window};
 use std::cell::Cell;
 
 use crate::services::dictionary::Language;
@@ -106,6 +106,22 @@ impl SettingsWindow {
 
         main_box.append(&lang_box);
         main_box.append(&desc_label);
+
+        // Close button
+        let close_button = Button::builder()
+            .label("Close")
+            .halign(gtk::Align::End)
+            .margin_top(8)
+            .build();
+
+        let window_weak = self.downgrade();
+        close_button.connect_clicked(move |_| {
+            if let Some(window) = window_weak.upgrade() {
+                window.close();
+            }
+        });
+
+        main_box.append(&close_button);
 
         self.set_child(Some(&main_box));
 

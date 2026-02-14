@@ -72,10 +72,13 @@ impl EyersHeaderBar {
         imp.open_button.set_label("Open PDF");
         imp.header_bar.pack_start(&imp.open_button);
 
-        // Translate toggle button
-        imp.translate_toggle.set_label("Translate");
-        imp.translate_toggle.set_active(false);
-        imp.header_bar.pack_end(&imp.translate_toggle);
+        // Translate toggle button (disabled for now - TODO: implement translation feature)
+        // imp.translate_toggle.set_label("Translate");
+        // imp.translate_toggle.set_active(false);
+        // imp.translate_toggle.set_sensitive(false);
+        // imp.translate_toggle
+        //     .set_tooltip_text(Some("Translation feature coming soon"));
+        // imp.header_bar.pack_end(&imp.translate_toggle);
 
         // Settings button (gear icon)
         imp.settings_button.set_icon_name("emblem-system-symbolic");

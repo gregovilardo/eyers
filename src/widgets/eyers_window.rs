@@ -388,6 +388,11 @@ impl EyersWindow {
                 true
             }
 
+            KeyAction::OpenSettings => {
+                self.show_settings_window();
+                true
+            }
+
             KeyAction::ScrollViewport {
                 x_percent,
                 y_percent,

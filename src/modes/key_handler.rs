@@ -1,7 +1,7 @@
 use gtk::gdk::{self, ModifierType};
 
 use crate::modes::app_mode::{AppMode, WordCursor};
-use crate::text_map::{NavDirection, TextMapCache, navigate};
+use crate::text_map::{navigate, NavDirection, TextMapCache};
 
 use pdfium_render::prelude::PdfDocument;
 
@@ -15,6 +15,7 @@ pub enum ScrollDir {
 pub enum KeyAction {
     Empty,
     OpenFile,
+    OpenSettings,
     ToggleHeaderBar,
     ScrollHalfPage(ScrollDir),
 
@@ -136,6 +137,7 @@ pub fn handle_post_global_key(keyval: gdk::Key) -> Option<KeyAction> {
     match keyval {
         gdk::Key::o => Some(KeyAction::OpenFile),
         gdk::Key::b => Some(KeyAction::ToggleHeaderBar),
+        gdk::Key::s => Some(KeyAction::OpenSettings),
         _ => None,
     }
 }
@@ -278,18 +280,18 @@ pub fn handle_visual_mode_key(
             }
         }
 
-        gdk::Key::t => {
-            if let Some((start, end)) = mode.selection_range() {
-                Some(KeyAction::Translate { start, end })
-            } else {
-                // Translate just the cursor word
-                Some(KeyAction::Translate {
-                    start: cursor,
-                    end: cursor,
-                })
-            }
-        }
-
+        // TODO: Re-enable translate functionality when implemented
+        // gdk::Key::t => {
+        //     if let Some((start, end)) = mode.selection_range() {
+        //         Some(KeyAction::Translate { start, end })
+        //     } else {
+        //         // Translate just the cursor word
+        //         Some(KeyAction::Translate {
+        //             start: cursor,
+        //             end: cursor,
+        //         })
+        //     }
+        // }
         gdk::Key::f => Some(KeyAction::PendingForward),
         gdk::Key::F => Some(KeyAction::PendingBackward),
 

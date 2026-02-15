@@ -6,6 +6,7 @@ use gtk::subclass::prelude::*;
 use gtk::{ApplicationWindow, Box, Orientation, Paned, PolicyType, ScrolledWindow};
 use pdfium_render::prelude::*;
 use std::cell::{Cell, RefCell};
+use std::fs;
 use std::path::Path;
 
 use crate::modes::key_handler::handle_post_global_key;
@@ -514,6 +515,11 @@ impl EyersWindow {
 
             KeyAction::Annotate { cursor, selection } => {
                 self.handle_annotate_action(cursor, selection);
+                true
+            }
+
+            KeyAction::ExportAnnotations => {
+                self.show_export_annotations_dialog();
                 true
             }
 
@@ -1566,6 +1572,147 @@ impl EyersWindow {
         self.open_file(&path);
     }
 
+    /// Show export annotations confirmation dialog
+    fn show_export_annotations_dialog(&self) {
+        let pdf_path = match self.imp().current_pdf_path.borrow().as_ref() {
+            Some(p) => p.clone(),
+            None => {
+                eprintln!("No PDF loaded, cannot export annotations");
+                return;
+            }
+        };
+
+        // Check if there are any annotations to export
+        let annotations = match annotations::load_annotations_for_pdf(&pdf_path) {
+            Ok(anns) => anns,
+            Err(e) => {
+                eprintln!("Failed to load annotations: {}", e);
+                return;
+            }
+        };
+
+        if annotations.is_empty() {
+            // Show a dialog saying there are no annotations
+            let dialog = gtk::AlertDialog::builder()
+                .message("No Annotations")
+                .detail("There are no annotations to export for this PDF.")
+                .buttons(["OK"])
+                .build();
+            dialog.show(Some(self));
+            return;
+        }
+
+        // Show confirmation dialog
+        let dialog = gtk::AlertDialog::builder()
+            .message("Export Annotations")
+            .detail(&format!(
+                "Export {} annotation(s) to a Markdown file?",
+                annotations.len()
+            ))
+            .buttons(["Cancel", "Export"])
+            .default_button(1)
+            .cancel_button(0)
+            .build();
+
+        let window_weak = self.downgrade();
+        dialog.choose(Some(self), None::<&gio::Cancellable>, move |result| {
+            if let Some(window) = window_weak.upgrade() {
+                if let Ok(choice) = result {
+                    if choice == 1 {
+                        // User chose "Export"
+                        window.show_export_file_chooser();
+                    }
+                }
+            }
+        });
+    }
+
+    /// Show file chooser for saving exported annotations
+    fn show_export_file_chooser(&self) {
+        let pdf_path = match self.imp().current_pdf_path.borrow().as_ref() {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        // Generate default filename from PDF name
+        let pdf_name = Path::new(&pdf_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("annotations");
+        let default_filename = format!("{}_annotations.md", pdf_name);
+
+        let dialog = gtk::FileDialog::builder()
+            .title("Save Annotations")
+            .initial_name(&default_filename)
+            .build();
+
+        let window_weak = self.downgrade();
+        dialog.save(Some(self), None::<&gio::Cancellable>, move |result| {
+            if let Some(window) = window_weak.upgrade() {
+                window.handle_export_save_result(result);
+            }
+        });
+    }
+
+    /// Handle the result of the export file save dialog
+    fn handle_export_save_result(&self, result: Result<gio::File, glib::Error>) {
+        let file = match result {
+            Ok(f) => f,
+            Err(_) => return, // User cancelled
+        };
+
+        let save_path = match file.path() {
+            Some(p) => p,
+            None => return,
+        };
+
+        let pdf_path = match self.imp().current_pdf_path.borrow().as_ref() {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        // Get PDF name for the markdown header
+        let pdf_name = Path::new(&pdf_path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unknown PDF");
+
+        // Generate markdown content
+        let markdown = match annotations::export_to_markdown(&pdf_path, pdf_name) {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("Failed to generate markdown: {}", e);
+                self.show_export_error(&format!("Failed to generate markdown: {}", e));
+                return;
+            }
+        };
+
+        // Write to file
+        if let Err(e) = fs::write(&save_path, &markdown) {
+            eprintln!("Failed to write file: {}", e);
+            self.show_export_error(&format!("Failed to write file: {}", e));
+            return;
+        }
+
+        // Show success message
+        let dialog = gtk::AlertDialog::builder()
+            .message("Export Successful")
+            .detail(&format!("Annotations saved to:\n{}", save_path.display()))
+            .buttons(["OK"])
+            .build();
+        dialog.show(Some(self));
+    }
+
+    /// Show an error dialog for export failures
+    fn show_export_error(&self, message: &str) {
+        let dialog = gtk::AlertDialog::builder()
+            .message("Export Failed")
+            .detail(message)
+            .buttons(["OK"])
+            .build();
+        dialog.show(Some(self));
+    }
+
     /// Open a PDF file from a path (public API for CLI usage)
     pub fn open_file(&self, path: &Path) {
         if let Err(e) = self.imp().pdf_view.load_pdf(path.to_path_buf()) {
@@ -1722,12 +1869,6 @@ impl EyersWindow {
         selection: Option<(WordCursor, WordCursor)>,
     ) {
         let imp = self.imp();
-
-        // If annotation panel is already visible, treat this as cancel/toggle
-        if imp.annotation_panel.is_visible() {
-            self.close_annotation_panel();
-            return;
-        }
 
         let pdf_path = match imp.current_pdf_path.borrow().as_ref() {
             Some(p) => p.clone(),

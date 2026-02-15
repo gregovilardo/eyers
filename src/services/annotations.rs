@@ -295,6 +295,45 @@ fn ranges_overlap(
     ann_start <= sel_end && sel_start <= ann_end
 }
 
+/// Export annotations for a PDF to markdown format
+/// Each annotation is formatted as:
+/// > "highlighted text" (Page X)
+///
+/// User's note
+pub fn export_to_markdown(pdf_path: &str, pdf_name: &str) -> Result<String, AnnotationError> {
+    let annotations = load_annotations_for_pdf(pdf_path)?;
+
+    if annotations.is_empty() {
+        return Ok(format!(
+            "# Annotations for {}\n\nNo annotations found.\n",
+            pdf_name
+        ));
+    }
+
+    let mut output = format!("# Annotations for {}\n\n", pdf_name);
+
+    for ann in annotations {
+        // Page number is 1-indexed for display
+        let page_num = ann.start_page + 1;
+
+        // Quote the highlighted text
+        output.push_str(&format!(
+            "> \"{}\" (Page {})\n\n",
+            ann.selected_text, page_num
+        ));
+
+        // Add the user's note
+        if !ann.note.is_empty() {
+            output.push_str(&ann.note);
+            output.push_str("\n\n");
+        }
+
+        output.push_str("---\n\n");
+    }
+
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

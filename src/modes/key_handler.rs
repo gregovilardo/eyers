@@ -51,6 +51,8 @@ pub enum KeyAction {
         cursor: WordCursor,
         selection: Option<(WordCursor, WordCursor)>,
     },
+    /// Export annotations to markdown file
+    ExportAnnotations,
     ScrollWithGG,
     ScrollToEnd,
     PendingG,
@@ -161,7 +163,8 @@ pub fn handle_post_global_key(keyval: gdk::Key) -> Option<KeyAction> {
     match keyval {
         gdk::Key::o => Some(KeyAction::OpenFile),
         gdk::Key::b => Some(KeyAction::ToggleHeaderBar),
-        gdk::Key::s => Some(KeyAction::OpenSettings),
+        gdk::Key::p => Some(KeyAction::OpenSettings),
+        gdk::Key::e => Some(KeyAction::ExportAnnotations),
         _ => None,
     }
 }

@@ -9,18 +9,16 @@ use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::Path;
 
-use crate::modes::key_handler::ScrollDir;
-use crate::modes::key_handler::handle_post_global_key;
-use crate::modes::key_handler::handle_pre_global_key;
 use crate::modes::{
-    AppMode, KeyAction, WordCursor, handle_normal_mode_key, handle_visual_mode_key,
+    handle_normal_mode_key, handle_post_global_key, handle_pre_global_key, handle_visual_mode_key,
+    AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor,
 };
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
+use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
 use crate::widgets::{
-    AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, TocPanel,
+    AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, StatusBar, TocPanel,
     TranslationPanel,
 };
 
@@ -44,8 +42,10 @@ mod imp {
         pub toast_revealer: gtk::Revealer,
         /// Toast label for displaying message
         pub toast_label: gtk::Label,
-        pub keyaction_state: Cell<KeyAction>,
-        pub pending_number: Cell<u32>,
+        /// Key handler for managing input state
+        pub key_handler: KeyHandler,
+        /// Status bar for displaying pending input
+        pub status_bar: StatusBar,
         /// Dictionary language setting
         pub dictionary_language: Cell<Language>,
         /// Current PDF file path (for annotations)
@@ -80,8 +80,8 @@ mod imp {
                 text_cache: RefCell::new(None),
                 toast_revealer,
                 toast_label,
-                keyaction_state: Cell::new(KeyAction::Empty),
-                pending_number: Cell::new(0),
+                key_handler: KeyHandler::new(),
+                status_bar: StatusBar::new(),
                 dictionary_language: Cell::new(Language::default()),
                 current_pdf_path: RefCell::new(None),
                 annotations: RefCell::new(Vec::new()),
@@ -194,12 +194,16 @@ impl EyersWindow {
         // Set up toast notification
         self.setup_toast();
 
-        // Create overlay for toast notifications
+        // Create overlay for toast notifications and status bar
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&main_box));
         overlay.add_overlay(&imp.toast_revealer);
+        overlay.add_overlay(&imp.status_bar);
 
         self.set_child(Some(&overlay));
+
+        // Bind key handler status-text to status bar
+        self.setup_key_handler_binding();
 
         self.setup_translation_panel();
         self.setup_annotation_panel();
@@ -208,6 +212,18 @@ impl EyersWindow {
         self.setup_keyboard_controller();
         self.setup_scroll_tracking();
         self.setup_page_indicator_label();
+    }
+
+    /// Set up binding between KeyHandler and StatusBar
+    fn setup_key_handler_binding(&self) {
+        let imp = self.imp();
+        let status_bar = imp.status_bar.clone();
+
+        imp.key_handler
+            .connect_notify_local(Some("status-text"), move |handler, _| {
+                let text = handler.status_text();
+                status_bar.set_status_text(&text);
+            });
     }
 
     fn setup_toast(&self) {
@@ -300,16 +316,17 @@ impl EyersWindow {
                 let imp = window.imp();
                 let toc_visible = imp.toc_panel.is_visible();
 
-                let keyaction_state = window.keyaction_state();
-                //None -> proceed
-                //Empty -> Stop
-                if let Some(action) =
-                    handle_pre_global_key(key, modifiers, toc_visible, keyaction_state)
-                {
-                    window.set_keyaction_state(action);
-                    if window.execute_key_action(action) {
+                // Try pre-global keys first
+                match handle_pre_global_key(&imp.key_handler, key, modifiers, toc_visible) {
+                    KeyResult::Action(action) => {
+                        if window.execute_key_action(action) {
+                            return glib::Propagation::Stop;
+                        }
+                    }
+                    KeyResult::StateChanged => {
                         return glib::Propagation::Stop;
                     }
+                    KeyResult::Unhandled => {}
                 }
 
                 // Handle mode-based key events
@@ -317,11 +334,17 @@ impl EyersWindow {
                     return glib::Propagation::Stop;
                 }
 
-                if let Some(action) = handle_post_global_key(key) {
-                    window.set_keyaction_state(action);
-                    if window.execute_key_action(action) {
+                // Try post-global keys
+                match handle_post_global_key(&imp.key_handler, key) {
+                    KeyResult::Action(action) => {
+                        if window.execute_key_action(action) {
+                            return glib::Propagation::Stop;
+                        }
+                    }
+                    KeyResult::StateChanged => {
                         return glib::Propagation::Stop;
                     }
+                    KeyResult::Unhandled => {}
                 }
             }
             glib::Propagation::Proceed
@@ -341,36 +364,36 @@ impl EyersWindow {
 
         let mode = imp.app_mode.borrow().clone();
 
-        let keyaction_state = self.keyaction_state();
-
-        if let Some(action) = match &mode {
-            AppMode::Normal => handle_normal_mode_key(key, keyaction_state),
+        let result = match &mode {
+            AppMode::Normal => handle_normal_mode_key(&imp.key_handler, key),
             AppMode::Visual { .. } => {
                 let doc_borrow = imp.pdf_view.document();
                 if let Some(ref doc) = *doc_borrow {
                     let mut cache = imp.text_cache.borrow_mut();
                     if let Some(ref mut cache) = *cache {
-                        handle_visual_mode_key(key, &mode, cache, doc, keyaction_state)
+                        handle_visual_mode_key(&imp.key_handler, key, &mode, cache, doc)
                     } else {
-                        None
+                        KeyResult::Unhandled
                     }
                 } else {
-                    None
+                    KeyResult::Unhandled
                 }
             }
-        } {
-            self.set_keyaction_state(action);
-            return self.execute_key_action(action);
         };
-        false
+
+        match result {
+            KeyResult::Action(action) => self.execute_key_action(action),
+            KeyResult::StateChanged => true,
+            KeyResult::Unhandled => false,
+        }
     }
 
     /// Execute a key action
     fn execute_key_action(&self, action: KeyAction) -> bool {
         let imp = self.imp();
 
-        let result = match action {
-            KeyAction::Empty => true,
+        match action {
+            KeyAction::None => true,
 
             KeyAction::ToggleTOC => {
                 self.toggle_toc_panel();
@@ -420,6 +443,21 @@ impl EyersWindow {
                 true
             }
 
+            KeyAction::ScrollToPage { page } => {
+                self.scroll_to_page(page);
+                true
+            }
+
+            KeyAction::ScrollToStart => {
+                self.scroll_to_document_start();
+                true
+            }
+
+            KeyAction::ScrollToEnd => {
+                self.scroll_to_document_end();
+                true
+            }
+
             KeyAction::EnterVisual => {
                 if let Some(cursor) = self.compute_first_visible_word() {
                     println!(
@@ -432,7 +470,6 @@ impl EyersWindow {
                     self.update_mode_display();
                     imp.pdf_view.set_cursor(Some(cursor));
                     self.update_highlights();
-                    // self.print_cursor_word(cursor);
                     true
                 } else {
                     println!("Could not find first visible word");
@@ -453,19 +490,13 @@ impl EyersWindow {
             }
 
             KeyAction::CursorMoved { cursor } => {
-                // println!(
-                //     "Cursor moved to page {} word {}",
-                //     cursor.page_index, cursor.word_index
-                // );
                 {
                     let mut mode = imp.app_mode.borrow_mut();
                     mode.set_cursor(cursor);
                 }
                 imp.pdf_view.set_cursor(Some(cursor));
-                // Update selection display to sync anchor-to-cursor range if selection is active
                 self.update_selection_display();
                 self.ensure_cursor_visible(cursor);
-                // self.print_cursor_word(cursor);
                 true
             }
 
@@ -489,7 +520,6 @@ impl EyersWindow {
             }
 
             KeyAction::ShowDefinition { cursor } => {
-                // Toggle: if popover is open, close it; otherwise show definition
                 if imp.pdf_view.has_popover() {
                     imp.pdf_view.close_current_popover();
                 } else {
@@ -499,7 +529,6 @@ impl EyersWindow {
             }
 
             KeyAction::Translate { start, end } => {
-                // Toggle: if translation panel is visible, hide it; otherwise translate
                 if imp.translation_panel.is_visible() {
                     imp.translation_panel.set_visible(false);
                 } else {
@@ -523,26 +552,7 @@ impl EyersWindow {
                 true
             }
 
-            KeyAction::ScrollWithGG => {
-                self.scroll_with_g(self.imp().pending_number.get());
-                true
-            }
-
-            KeyAction::ScrollToEnd => {
-                self.scroll_to_document_end();
-                true
-            }
-
-            KeyAction::PendingG => true,
-            KeyAction::PendingFForward => true,
-            KeyAction::PendingFBackward => true,
-            KeyAction::PendingNumber { number } => {
-                self.imp().pending_number.set(number);
-                true
-            }
-
             KeyAction::FindForward { letter } => {
-                // !TODO: Change this function, horrible boolean value
                 self.execute_find(letter, true);
                 true
             }
@@ -561,15 +571,7 @@ impl EyersWindow {
                 self.zoom_out();
                 true
             }
-        };
-
-        if !matches!(action, KeyAction::PendingNumber { number: _ }) {
-            if !matches!(action, KeyAction::PendingG) {
-                self.imp().pending_number.set(0);
-            }
         }
-
-        return result;
     }
 
     /// Scroll the viewport by a percentage
@@ -611,14 +613,6 @@ impl EyersWindow {
         if let Some(cursor) = self.compute_word_at_viewport_offset(DEFAULT_VIEWPORT_OFFSET) {
             self.move_cursor(cursor);
         }
-    }
-
-    fn scroll_with_g(&self, page_number: u32) {
-        if page_number == 0 {
-            self.scroll_to_document_start();
-            return;
-        }
-        self.scroll_to_page(page_number);
     }
 
     fn scroll_to_page(&self, page_number: u32) {
@@ -1794,11 +1788,8 @@ impl EyersWindow {
         &self.imp().translation_panel
     }
 
-    pub fn set_keyaction_state(&self, keyaction: KeyAction) {
-        self.imp().keyaction_state.set(keyaction);
-    }
-    pub fn keyaction_state(&self) -> KeyAction {
-        self.imp().keyaction_state.get()
+    pub fn key_handler(&self) -> &KeyHandler {
+        &self.imp().key_handler
     }
 
     // ============ Annotation Methods ============

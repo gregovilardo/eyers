@@ -81,3 +81,20 @@
     border: 1px solid @borders;
     border-radius: 4px;
 }
+
+/* Status Bar (pending key input display) */
+.status-bar {
+    background-color: #303030;
+    color: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    border: 1px solid #505050;
+}
+
+.status-bar-label {
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 1.1em;
+    color: #ffcc00;
+    min-width: 40px;
+}

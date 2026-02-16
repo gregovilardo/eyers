@@ -1,10 +1,12 @@
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, params};
 use std::path::PathBuf;
+
+pub type AnnotationId = i64;
 
 /// Represents an annotation on a PDF document
 #[derive(Debug, Clone)]
 pub struct Annotation {
-    pub id: i64,
+    pub id: AnnotationId,
     pub pdf_path: String,
     pub start_page: usize,
     pub start_word: usize,
@@ -318,7 +320,7 @@ pub fn export_to_markdown(pdf_path: &str, pdf_name: &str) -> Result<String, Anno
 
         // Quote the highlighted text
         output.push_str(&format!(
-            "> \"{}\" (Page {})\n\n",
+            "> **\"{}\"** (Page {})\n\n",
             ann.selected_text, page_num
         ));
 

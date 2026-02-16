@@ -9,16 +9,16 @@ use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::Path;
 
+use crate::modes::key_handler::ScrollDir;
 use crate::modes::key_handler::handle_post_global_key;
 use crate::modes::key_handler::handle_pre_global_key;
-use crate::modes::key_handler::ScrollDir;
 use crate::modes::{
-    handle_normal_mode_key, handle_visual_mode_key, AppMode, KeyAction, WordCursor,
+    AppMode, KeyAction, WordCursor, handle_normal_mode_key, handle_visual_mode_key,
 };
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
+use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::{
     AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, TocPanel,
     TranslationPanel,
@@ -534,8 +534,8 @@ impl EyersWindow {
             }
 
             KeyAction::PendingG => true,
-            KeyAction::PendingForward => true,
-            KeyAction::PendingBackward => true,
+            KeyAction::PendingFForward => true,
+            KeyAction::PendingFBackward => true,
             KeyAction::PendingNumber { number } => {
                 self.imp().pending_number.set(number);
                 true

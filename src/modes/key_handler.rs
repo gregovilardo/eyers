@@ -1,7 +1,8 @@
 use gtk::gdk::{self, ModifierType};
 
 use crate::modes::app_mode::{AppMode, WordCursor};
-use crate::text_map::{navigate, NavDirection, TextMapCache};
+use crate::services::annotations::AnnotationId;
+use crate::text_map::{NavDirection, TextMapCache, navigate};
 
 use pdfium_render::prelude::PdfDocument;
 
@@ -56,8 +57,8 @@ pub enum KeyAction {
     ScrollWithGG,
     ScrollToEnd,
     PendingG,
-    PendingForward,
-    PendingBackward,
+    PendingFForward,
+    PendingFBackward,
     PendingNumber {
         number: u32,
     },
@@ -91,7 +92,7 @@ pub fn handle_pre_global_key(
     keyval: gdk::Key,
     modifiers: ModifierType,
     is_toc_visible: bool,
-    key_action: KeyAction,
+    prev_key_action: KeyAction,
 ) -> Option<KeyAction> {
     if modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
         return match keyval {
@@ -102,7 +103,7 @@ pub fn handle_pre_global_key(
     }
 
     if let Some(digit) = get_number_from_key(keyval) {
-        let new_number = match key_action {
+        let new_number = match prev_key_action {
             KeyAction::PendingNumber { number } => {
                 number
                     .checked_mul(10)
@@ -115,13 +116,13 @@ pub fn handle_pre_global_key(
         return Some(KeyAction::PendingNumber { number: new_number });
     }
 
-    match key_action {
-        KeyAction::PendingForward => return None,
-        KeyAction::PendingBackward => return None,
+    match prev_key_action {
+        KeyAction::PendingFForward => return None,
+        KeyAction::PendingFBackward => return None,
         _ => {}
     }
 
-    if matches!(key_action, KeyAction::PendingG) {
+    if matches!(prev_key_action, KeyAction::PendingG) {
         return match keyval {
             gdk::Key::g => Some(KeyAction::ScrollWithGG),
             _ => Some(KeyAction::Empty), // Any other key cancels the pending 'g'
@@ -211,14 +212,14 @@ pub fn handle_visual_mode_key(
 
     // !TODO: Aca si apretas SHIFT para mayuscula devuelve empty.
     // es caseinsensitive por lo que no haria falta pero puede ser molesto
-    if matches!(key_action, KeyAction::PendingForward) {
+    if matches!(key_action, KeyAction::PendingFForward) {
         if let Some(letter) = keyval.to_unicode() {
             return Some(KeyAction::FindForward { letter: letter });
         }
         return Some(KeyAction::Empty);
     }
 
-    if matches!(key_action, KeyAction::PendingBackward) {
+    if matches!(key_action, KeyAction::PendingFBackward) {
         if let Some(letter) = keyval.to_unicode() {
             return Some(KeyAction::FindBackward { letter: letter });
         }
@@ -319,8 +320,8 @@ pub fn handle_visual_mode_key(
         //         })
         //     }
         // }
-        gdk::Key::f => Some(KeyAction::PendingForward),
-        gdk::Key::F => Some(KeyAction::PendingBackward),
+        gdk::Key::f => Some(KeyAction::PendingFForward),
+        gdk::Key::F => Some(KeyAction::PendingFBackward),
 
         gdk::Key::y => {
             if let Some((start, end)) = mode.selection_range() {

@@ -14,5 +14,4 @@
 - when moving to a new chapter the visual cursor stays on old page, it should change like it change with ctrl+d
 - copy LaTEX 
 
-
-
+- add more mouse driven actions

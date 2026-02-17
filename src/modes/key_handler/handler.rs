@@ -29,11 +29,13 @@ mod imp {
             use std::sync::OnceLock;
             static PROPERTIES: OnceLock<Vec<glib::ParamSpec>> = OnceLock::new();
             PROPERTIES.get_or_init(|| {
-                vec![glib::ParamSpecString::builder("status-text")
-                    .nick("Status Text")
-                    .blurb("Text to display in the status bar showing pending input")
-                    .read_only()
-                    .build()]
+                vec![
+                    glib::ParamSpecString::builder("status-text")
+                        .nick("Status Text")
+                        .blurb("Text to display in the status bar showing pending input")
+                        .read_only()
+                        .build(),
+                ]
             })
         }
 
@@ -118,7 +120,9 @@ impl KeyHandler {
                 .unwrap_or(current), // Keep original on overflow
             None => digit,
         };
-        self.set_pending_count(Some(new_count));
+        if new_count != 0 {
+            self.set_pending_count(Some(new_count));
+        }
     }
 
     /// Reset all state (input state and count)

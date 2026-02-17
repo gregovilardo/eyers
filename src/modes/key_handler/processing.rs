@@ -2,7 +2,7 @@ use gtk::gdk::{self, ModifierType};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::modes::app_mode::{AppMode, WordCursor};
-use crate::text_map::{navigate, NavDirection, TextMapCache};
+use crate::text_map::{NavDirection, TextMapCache, navigate};
 
 use super::handler::KeyHandler;
 use super::input_state::InputState;
@@ -58,15 +58,8 @@ pub fn handle_pre_global_key(
         };
     }
 
-    // Handle number accumulation
-    if let Some(digit) = get_number_from_key(keyval) {
-        handler.accumulate_digit(digit);
-        return KeyResult::StateChanged;
-    }
-
-    let input_state = handler.input_state();
-
     // Handle pending states that need a character
+    let input_state = handler.input_state();
     match input_state {
         InputState::PendingFForward | InputState::PendingFBackward => {
             // These are handled in visual mode key handler
@@ -93,6 +86,12 @@ pub fn handle_pre_global_key(
                 KeyResult::Action(KeyAction::None)
             }
         };
+    }
+
+    // Handle number accumulation
+    if let Some(digit) = get_number_from_key(keyval) {
+        handler.accumulate_digit(digit);
+        return KeyResult::StateChanged;
     }
 
     // Regular key handling
@@ -130,6 +129,12 @@ pub fn handle_pre_global_key(
                 None => KeyResult::Action(KeyAction::ScrollToEnd),
             }
         }
+        //TODO: PendingNext para usar con annotations no sigue mucho la filosofia de vim ...
+        //USAR [a  ]a jeje
+        // gdk::Key::n => {
+        //     handler.set_input_state(InputState::PendingNext);
+        //     KeyResult::StateChanged
+        // }
         _ => KeyResult::Unhandled,
     }
 }
@@ -205,17 +210,25 @@ pub fn handle_visual_mode_key(
 
     // Handle pending find operations
     if matches!(input_state, InputState::PendingFForward) {
+        let count = handler.count();
         handler.reset();
         if let Some(letter) = keyval.to_unicode() {
-            return KeyResult::Action(KeyAction::FindForward { letter });
+            return KeyResult::Action(KeyAction::FindForward {
+                letter,
+                repeat: count,
+            });
         }
         return KeyResult::Action(KeyAction::None);
     }
 
     if matches!(input_state, InputState::PendingFBackward) {
+        let count = handler.count();
         handler.reset();
         if let Some(letter) = keyval.to_unicode() {
-            return KeyResult::Action(KeyAction::FindBackward { letter });
+            return KeyResult::Action(KeyAction::FindBackward {
+                letter,
+                repeat: count,
+            });
         }
         return KeyResult::Action(KeyAction::None);
     }

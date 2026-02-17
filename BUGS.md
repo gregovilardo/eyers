@@ -7,4 +7,3 @@ like if it wasn't center
 - in chapter "A wise attitude to the hindrances" in first paragraph the ordering of words is bugged
 - DODbook, pag 3, going down in visual mode with ctrl+d stuck cursor in "generic" text
    - also happens immediatly on first page
-

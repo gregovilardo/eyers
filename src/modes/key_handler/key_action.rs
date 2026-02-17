@@ -70,9 +70,11 @@ pub enum KeyAction {
     // === Find Operations ===
     FindForward {
         letter: char,
+        repeat: u32,
     },
     FindBackward {
         letter: char,
+        repeat: u32,
     },
 
     // === Zoom ===

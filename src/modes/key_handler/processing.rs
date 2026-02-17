@@ -61,7 +61,10 @@ pub fn handle_pre_global_key(
     // Handle pending states that need a character
     let input_state = handler.input_state();
     match input_state {
-        InputState::PendingFForward | InputState::PendingFBackward => {
+        InputState::PendingFForward
+        | InputState::PendingFBackward
+        | InputState::PendingElementForward
+        | InputState::PendingElementBackward => {
             // These are handled in visual mode key handler
             return KeyResult::Unhandled;
         }
@@ -210,27 +213,39 @@ pub fn handle_visual_mode_key(
 
     // Handle pending find operations
     if matches!(input_state, InputState::PendingFForward) {
-        let count = handler.count();
-        handler.reset();
         if let Some(letter) = keyval.to_unicode() {
-            return KeyResult::Action(KeyAction::FindForward {
-                letter,
-                repeat: count,
-            });
+            return KeyResult::Action(KeyAction::FindForward { letter });
         }
+        handler.reset();
         return KeyResult::Action(KeyAction::None);
     }
 
     if matches!(input_state, InputState::PendingFBackward) {
-        let count = handler.count();
-        handler.reset();
         if let Some(letter) = keyval.to_unicode() {
-            return KeyResult::Action(KeyAction::FindBackward {
-                letter,
-                repeat: count,
-            });
+            return KeyResult::Action(KeyAction::FindBackward { letter });
         }
+        handler.reset();
         return KeyResult::Action(KeyAction::None);
+    }
+
+    if matches!(input_state, InputState::PendingElementForward) {
+        return match keyval {
+            gdk::Key::a => KeyResult::Action(KeyAction::SearchAnnotationForward),
+            _ => {
+                handler.reset();
+                KeyResult::Action(KeyAction::None)
+            }
+        };
+    }
+
+    if matches!(input_state, InputState::PendingElementBackward) {
+        return match keyval {
+            gdk::Key::a => KeyResult::Action(KeyAction::SearchAnnotationBackward),
+            _ => {
+                handler.reset();
+                KeyResult::Action(KeyAction::None)
+            }
+        };
     }
 
     // Navigation keys with optional count
@@ -300,6 +315,16 @@ pub fn handle_visual_mode_key(
         }
         gdk::Key::F => {
             handler.set_input_state(InputState::PendingFBackward);
+            KeyResult::StateChanged
+        }
+
+        gdk::Key::bracketright => {
+            handler.set_input_state(InputState::PendingElementForward);
+            KeyResult::StateChanged
+        }
+
+        gdk::Key::bracketleft => {
+            handler.set_input_state(InputState::PendingElementBackward);
             KeyResult::StateChanged
         }
 

@@ -11,8 +11,10 @@ pub enum InputState {
     PendingFForward,
     /// Waiting for a character to find backward (F + char)
     PendingFBackward,
-    /// Waiting for next command (n + a for next annotation, etc.)
-    PendingNext,
+    /// Waiting for an element to search it forward (]+a for annotations for example)
+    PendingElementForward,
+    /// Waiting for an element to search it backward ([+a for annotations for example)
+    PendingElementBackward,
 }
 
 impl InputState {
@@ -28,7 +30,8 @@ impl InputState {
             InputState::PendingG => "g",
             InputState::PendingFForward => "f",
             InputState::PendingFBackward => "F",
-            InputState::PendingNext => "n",
+            InputState::PendingElementForward => "]",
+            InputState::PendingElementBackward => "[",
         }
     }
 }

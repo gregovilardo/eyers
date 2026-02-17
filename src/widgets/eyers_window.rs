@@ -13,6 +13,9 @@ use crate::modes::{
     AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
     handle_post_global_key, handle_pre_global_key, handle_visual_mode_key,
 };
+use crate::services::annotations::find_annotation_at_position;
+use crate::services::annotations::find_next_annotation_at_position;
+use crate::services::annotations::find_prev_annotation_at_position;
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
@@ -552,7 +555,9 @@ impl EyersWindow {
                 true
             }
 
-            KeyAction::FindForward { letter, repeat } => {
+            KeyAction::FindForward { letter } => {
+                let repeat = self.key_handler().count();
+                self.key_handler().reset();
                 for _ in 0..repeat {
                     //TODO: hate boolean vibecoded crap, please remove for execute_find_forward
                     let result = self.execute_find(letter, true);
@@ -563,9 +568,35 @@ impl EyersWindow {
                 true
             }
 
-            KeyAction::FindBackward { letter, repeat } => {
+            KeyAction::FindBackward { letter } => {
+                let repeat = self.key_handler().count();
+                self.key_handler().reset();
                 for _ in 0..repeat {
                     let result = self.execute_find(letter, false);
+                    if !result {
+                        break;
+                    }
+                }
+                true
+            }
+
+            KeyAction::SearchAnnotationForward => {
+                let repeat = self.key_handler().count();
+                self.key_handler().reset();
+                for _ in 0..repeat {
+                    let result = self.search_annotation_forward();
+                    if !result {
+                        break;
+                    }
+                }
+                true
+            }
+
+            KeyAction::SearchAnnotationBackward => {
+                let repeat = self.key_handler().count();
+                self.key_handler().reset();
+                for _ in 0..repeat {
+                    let result = self.search_annotation_backward();
                     if !result {
                         break;
                     }
@@ -1361,19 +1392,73 @@ impl EyersWindow {
 
         // Update cursor if found
         if let Some(new_cursor) = new_cursor {
-            {
-                let mut mode = imp.app_mode.borrow_mut();
-                mode.set_cursor(new_cursor);
-            }
-            imp.pdf_view.set_cursor(Some(new_cursor));
-            self.update_selection_display();
-            self.ensure_cursor_visible(new_cursor);
-            self.print_cursor_word(new_cursor);
+            self.update_cursor(new_cursor);
             true
         } else {
             // No match found, do nothing
             false
         }
+    }
+
+    // returns true if it finds one
+    fn search_annotation_forward(&self) -> bool {
+        // Only works in Visual mode
+        let imp = self.imp();
+        let cursor = match imp.app_mode.borrow().cursor() {
+            Some(c) => c,
+            None => return false,
+        };
+
+        let pdf_ref = imp.current_pdf_path.borrow();
+        let pdf_path = pdf_ref
+            .as_ref()
+            .expect("Pdf Path, you can't search annotations if you don't have an open pdf");
+
+        if let Ok(Some(annotation)) =
+            find_next_annotation_at_position(&pdf_path, cursor.page_index, cursor.word_index)
+        {
+            let new_cursor = WordCursor::new(annotation.start_page, annotation.start_word);
+            self.update_cursor(new_cursor);
+            true
+        } else {
+            false
+        }
+    }
+
+    // returns true if it finds one
+    fn search_annotation_backward(&self) -> bool {
+        // Only works in Visual mode
+        let imp = self.imp();
+        let cursor = match imp.app_mode.borrow().cursor() {
+            Some(c) => c,
+            None => return false,
+        };
+
+        let pdf_ref = imp.current_pdf_path.borrow();
+        let pdf_path = pdf_ref
+            .as_ref()
+            .expect("Pdf Path, you can't search annotations if you don't have an open pdf");
+
+        if let Ok(Some(annotation)) =
+            find_prev_annotation_at_position(&pdf_path, cursor.page_index, cursor.word_index)
+        {
+            let new_cursor = WordCursor::new(annotation.start_page, annotation.start_word);
+            self.update_cursor(new_cursor);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn update_cursor(&self, new_cursor: WordCursor) {
+        {
+            let mut mode = self.imp().app_mode.borrow_mut();
+            mode.set_cursor(new_cursor);
+        }
+        self.imp().pdf_view.set_cursor(Some(new_cursor));
+        self.update_selection_display();
+        self.ensure_cursor_visible(new_cursor);
+        self.print_cursor_word(new_cursor);
     }
 
     /// Copy text range to clipboard and show feedback popup

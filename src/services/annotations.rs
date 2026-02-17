@@ -235,6 +235,44 @@ pub fn get_annotation(id: i64) -> Result<Annotation, AnnotationError> {
     })
 }
 
+pub fn find_prev_annotation_at_position(
+    pdf_path: &str,
+    page_index: usize,
+    word_index: usize,
+) -> Result<Option<Annotation>, AnnotationError> {
+    let annotations = load_annotations_for_pdf(pdf_path)?;
+
+    for ann in annotations.into_iter().rev() {
+        let pos = (page_index, word_index);
+        let end = (ann.end_page, ann.end_word);
+        // If annotations come ordered from start to finish it would work find
+        if pos > end {
+            return Ok(Some(ann));
+        }
+    }
+
+    Ok(None)
+}
+
+pub fn find_next_annotation_at_position(
+    pdf_path: &str,
+    page_index: usize,
+    word_index: usize,
+) -> Result<Option<Annotation>, AnnotationError> {
+    let annotations = load_annotations_for_pdf(pdf_path)?;
+
+    for ann in annotations {
+        let pos = (page_index, word_index);
+        let start = (ann.start_page, ann.start_word);
+        // If annotations come ordered from start to finish it would work find
+        if pos < start {
+            return Ok(Some(ann));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Find an annotation that contains a specific word position
 /// Returns the annotation if the word at (page_index, word_index) falls within any annotation's range
 pub fn find_annotation_at_position(

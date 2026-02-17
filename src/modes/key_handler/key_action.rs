@@ -1,4 +1,5 @@
 use crate::modes::app_mode::WordCursor;
+use crate::services::annotations::AnnotationId;
 
 /// Direction for scrolling operations
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -70,12 +71,13 @@ pub enum KeyAction {
     // === Find Operations ===
     FindForward {
         letter: char,
-        repeat: u32,
     },
     FindBackward {
         letter: char,
-        repeat: u32,
     },
+
+    SearchAnnotationForward,
+    SearchAnnotationBackward,
 
     // === Zoom ===
     ZoomIn,

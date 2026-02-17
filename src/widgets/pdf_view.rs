@@ -1,5 +1,5 @@
-use glib::subclass::Signal;
 use glib::Properties;
+use glib::subclass::Signal;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;

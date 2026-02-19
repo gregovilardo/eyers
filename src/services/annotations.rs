@@ -1,6 +1,6 @@
 use gtk::glib;
 use rusqlite::{Connection, OpenFlags, params};
-use std::path::PathBuf;
+use std::{cmp::Ordering, path::PathBuf};
 
 use crate::modes::WordCursor;
 
@@ -31,6 +31,25 @@ pub enum AnnotationError {
 impl Annotation {
     pub fn get_start_word_cursor(&self) -> WordCursor {
         WordCursor::new(self.start_page, self.start_word)
+    }
+    pub fn get_id(&self) -> AnnotationId {
+        self.id
+    }
+}
+
+impl PartialEq for Annotation {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl PartialOrd for Annotation {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let page_cmp = self.start_page.cmp(&other.start_page);
+        if page_cmp != Ordering::Equal {
+            return Some(page_cmp);
+        }
+        Some(self.start_word.cmp(&other.start_word))
     }
 }
 

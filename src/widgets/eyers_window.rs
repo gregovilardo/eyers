@@ -2114,11 +2114,14 @@ impl EyersWindow {
         };
 
         match result {
-            Ok(_) => {
+            Ok(id) => {
                 println!("Annotation saved successfully");
                 self.close_annotation_panel();
                 self.reload_annotations();
                 self.update_annotation_highlights();
+                if let Ok(annotation) = annotations::get_annotation(id) {
+                    self.imp().toc_panel.update_listbox_annotations(annotation);
+                }
             }
             Err(e) => {
                 eprintln!("Failed to save annotation: {}", e);

@@ -315,6 +315,34 @@ impl TocPanel {
         }
     }
 
+    pub fn update_listbox_annotations(&self, new_annotation: Annotation) {
+        let list = &self.imp().list_box_annotations;
+
+        let mut i = 0;
+        while let Some(row) = list.row_at_index(i) {
+            if let Some(ann_row) = row.downcast_ref::<TocAnnotationRow>() {
+                let current_annotation = ann_row.imp().annotation.borrow();
+                println!("{current_annotation:#?}");
+                println!("{new_annotation:#?}");
+                if *current_annotation == new_annotation {
+                    println!("EQUAL");
+                    list.remove(ann_row);
+                    list.insert(ann_row, i);
+                    list.invalidate_sort();
+                    return;
+                }
+                if *current_annotation > new_annotation {
+                    println!("NOT EQUAL AND GREATER");
+                    list.insert(&TocAnnotationRow::new(new_annotation), i);
+                    list.invalidate_sort();
+                    return;
+                }
+                i += 1;
+                if list
+            }
+        }
+    }
+
     pub fn toc_mode(&self) -> TocMode {
         self.imp().mode.get()
     }
@@ -493,7 +521,7 @@ impl TocPanel {
         }
     }
 
-    pub fn clear_current_listbox(&self) {
+    fn clear_current_listbox(&self) {
         let list_box = self.get_current_list_box();
 
         while let Some(row) = list_box.first_child() {

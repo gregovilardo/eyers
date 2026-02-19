@@ -322,24 +322,32 @@ impl TocPanel {
         while let Some(row) = list.row_at_index(i) {
             if let Some(ann_row) = row.downcast_ref::<TocAnnotationRow>() {
                 let current_annotation = ann_row.imp().annotation.borrow();
-                println!("{current_annotation:#?}");
-                println!("{new_annotation:#?}");
                 if *current_annotation == new_annotation {
-                    println!("EQUAL");
                     list.remove(ann_row);
                     list.insert(ann_row, i);
-                    list.invalidate_sort();
                     return;
                 }
                 if *current_annotation > new_annotation {
-                    println!("NOT EQUAL AND GREATER");
                     list.insert(&TocAnnotationRow::new(new_annotation), i);
-                    list.invalidate_sort();
                     return;
                 }
                 i += 1;
-                if list
             }
+        }
+        list.append(&TocAnnotationRow::new(new_annotation));
+    }
+
+    pub fn remove_listbox_annotation(&self, id: i64) {
+        let list = &self.imp().list_box_annotations;
+        let mut child = list.first_child();
+        while let Some(row) = child {
+            if let Some(annotation_row) = row.downcast_ref::<TocAnnotationRow>() {
+                if annotation_row.imp().annotation.borrow().get_id() == id {
+                    list.remove(annotation_row);
+                    return;
+                }
+            }
+            child = row.next_sibling();
         }
     }
 

@@ -2136,6 +2136,7 @@ impl EyersWindow {
                 self.close_annotation_panel();
                 self.reload_annotations();
                 self.update_annotation_highlights();
+                self.imp().toc_panel.remove_listbox_annotation(id);
             }
             Err(e) => {
                 eprintln!("Failed to delete annotation: {}", e);

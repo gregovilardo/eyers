@@ -302,7 +302,6 @@ impl EyersWindow {
         });
 
         let pdf_view = imp.pdf_view.clone();
-        let app_mode = imp.app_mode.borrow().clone();
         let weak_self = self.downgrade();
         imp.toc_panel.connect_closure(
             "toc-entry-selected",
@@ -312,7 +311,8 @@ impl EyersWindow {
                     let Some(this) = weak_self.upgrade() else {
                         return;
                     };
-                    pdf_view.scroll_to_page(page_index);
+                    pdf_view.scroll_to_page(page_index as u16);
+                    let app_mode = this.imp().app_mode.borrow().clone();
                     match app_mode {
                         AppMode::Visual {
                             cursor: _cursor,
@@ -473,7 +473,7 @@ impl EyersWindow {
             }
 
             KeyAction::ScrollToPage { page } => {
-                self.scroll_to_page(page);
+                self.scroll_to_page(page as u16);
                 true
             }
 
@@ -683,7 +683,7 @@ impl EyersWindow {
         }
     }
 
-    fn scroll_to_page(&self, page_number: u32) {
+    fn scroll_to_page(&self, page_number: u16) {
         let pdf_view = &self.imp().pdf_view;
         pdf_view.scroll_to_page(page_number);
         if let Some(cursor) = self.compute_word_at_viewport_offset(DEFAULT_VIEWPORT_OFFSET) {
@@ -721,7 +721,7 @@ impl EyersWindow {
         };
         drop(doc_borrow);
 
-        imp.pdf_view.scroll_to_page(last_page as u32);
+        imp.pdf_view.scroll_to_page(last_page);
 
         if let Some(cursor) = self.compute_last_word_of_page(last_page as usize) {
             self.move_cursor(cursor);

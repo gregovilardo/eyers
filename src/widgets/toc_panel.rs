@@ -28,7 +28,7 @@ mod imp {
 
     #[derive(Default)]
     pub struct TocChapterRow {
-        pub page_index: Cell<u32>,
+        pub page_index: Cell<u16>,
         pub depth: Cell<usize>,
     }
 
@@ -45,7 +45,7 @@ mod imp {
 
     #[derive(Default)]
     pub struct TocAnnotationRow {
-        pub page_index: Cell<u32>,
+        pub page_index: Cell<u16>,
         pub annotation: RefCell<Annotation>,
     }
 
@@ -106,7 +106,7 @@ glib::wrapper! {
 }
 
 impl TocChapterRow {
-    pub fn new(page_index: u32, title: &str, depth: usize) -> Self {
+    pub fn new(page_index: u16, title: &str, depth: usize) -> Self {
         let row: TocChapterRow = glib::Object::builder().build();
         row.imp().page_index.set(page_index);
         row.imp().depth.set(depth);
@@ -138,7 +138,7 @@ impl TocChapterRow {
         row
     }
 
-    pub fn page_index(&self) -> u32 {
+    pub fn page_index(&self) -> u16 {
         self.imp().page_index.get()
     }
 
@@ -272,9 +272,10 @@ impl TocPanel {
         imp.list_box_chapters.connect_row_activated(move |_, row| {
             if let Some(panel) = panel_weak.upgrade() {
                 if let Some(entry_row) = row.downcast_ref::<TocChapterRow>() {
+                    let null: Option<WordCursor> = None;
                     panel.emit_by_name::<()>(
                         "toc-entry-selected",
-                        &[&(entry_row.page_index() as u32)],
+                        &[&(entry_row.page_index() as u32), &null],
                     );
                 }
             }
@@ -285,12 +286,11 @@ impl TocPanel {
             .connect_row_activated(move |_, row| {
                 if let Some(panel) = panel_weak.upgrade() {
                     if let Some(entry_row) = row.downcast_ref::<TocAnnotationRow>() {
+                        let cursor =
+                            Some(entry_row.imp().annotation.borrow().get_start_word_cursor());
                         panel.emit_by_name::<()>(
                             "toc-entry-selected",
-                            &[
-                                &(entry_row.page_index() as u32),
-                                &(entry_row.imp().annotation.borrow().get_start_word_cursor()),
-                            ],
+                            &[&(entry_row.page_index() as u32), &cursor],
                         );
                     }
                 }
@@ -384,12 +384,12 @@ impl TocPanel {
         imp.list_box_chapters.append(&entry_row);
     }
 
-    pub fn select_current_chapter(&self, page: u32) {
+    pub fn select_current_chapter(&self, page: u16) {
         let imp = self.imp();
         let children = imp.list_box_chapters.observe_children();
 
         let mut best_match: Option<glib::Object> = None;
-        let mut best_page_index: u32 = 0;
+        let mut best_page_index: u16 = 0;
 
         for item in children.iter::<glib::Object>() {
             match item {
@@ -465,7 +465,11 @@ impl TocPanel {
 
         if let Some(row) = list_box.selected_row() {
             if let Some(entry_row) = row.downcast_ref::<TocChapterRow>() {
-                self.emit_by_name::<()>("toc-entry-selected", &[&(entry_row.page_index() as u32)]);
+                let null: Option<WordCursor> = None;
+                self.emit_by_name::<()>(
+                    "toc-entry-selected",
+                    &[&(entry_row.page_index() as u32), &null],
+                );
                 self.set_visible(false);
             }
             if let Some(entry_row) = row.downcast_ref::<TocAnnotationRow>() {

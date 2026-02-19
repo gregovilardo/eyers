@@ -3,7 +3,7 @@ use pdfium_render::prelude::*;
 #[derive(Debug, Clone)]
 pub struct BookmarkEntry {
     pub title: String,
-    pub page_index: u32,
+    pub page_index: u16,
     pub children: Vec<BookmarkEntry>,
     pub depth: usize,
 }

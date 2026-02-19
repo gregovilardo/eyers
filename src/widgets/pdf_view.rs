@@ -1,5 +1,5 @@
-use glib::Properties;
 use glib::subclass::Signal;
+use glib::Properties;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -47,8 +47,8 @@ mod imp {
         /// Tracks which pages have been rendered at current zoom level
         pub(super) rendered_pages: RefCell<HashSet<usize>>,
         pub selection_start: RefCell<Option<SelectionPoint>>,
-        pub current_page: Cell<u32>,
-        pub total_pages: Cell<u32>,
+        pub current_page: Cell<u16>,
+        pub total_pages: Cell<u16>,
         pub pending_update: Cell<bool>,
         pub visual_cursor: RefCell<Option<WordCursor>>,
         pub visual_selection: RefCell<Option<(WordCursor, WordCursor)>>,
@@ -562,7 +562,7 @@ impl PdfView {
         }
     }
 
-    pub fn scroll_to_page(&self, page_index: u32) {
+    pub fn scroll_to_page(&self, page_index: u16) {
         println!("scrolling to page {}", page_index);
         if let Some(scrolled) = self.find_scrolled_window() {
             //TODO: find if you can stop the scroll of mouse so it can set value of adjustment
@@ -609,15 +609,15 @@ impl PdfView {
         self.imp().document.borrow().is_some()
     }
 
-    pub fn current_page(&self) -> u32 {
+    pub fn current_page(&self) -> u16 {
         self.imp().current_page.get()
     }
 
-    pub fn total_pages(&self) -> u32 {
+    pub fn total_pages(&self) -> u16 {
         self.imp().total_pages.get()
     }
 
-    pub fn set_total_pages(&self, pages: u32) {
+    pub fn set_total_pages(&self, pages: u16) {
         self.imp().total_pages.set(pages);
     }
 

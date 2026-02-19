@@ -323,8 +323,9 @@ impl TocPanel {
             if let Some(ann_row) = row.downcast_ref::<TocAnnotationRow>() {
                 let current_annotation = ann_row.imp().annotation.borrow();
                 if *current_annotation == new_annotation {
+                    println!("son igualesh");
                     list.remove(ann_row);
-                    list.insert(ann_row, i);
+                    list.insert(&TocAnnotationRow::new(new_annotation), i);
                     return;
                 }
                 if *current_annotation > new_annotation {

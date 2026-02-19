@@ -9,17 +9,18 @@ use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::Path;
 
+use crate::modes::app_mode;
 use crate::modes::{
     AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
     handle_post_global_key, handle_pre_global_key, handle_visual_mode_key,
 };
-use crate::services::annotations::find_annotation_at_position;
 use crate::services::annotations::find_next_annotation_at_position;
 use crate::services::annotations::find_prev_annotation_at_position;
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
 use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
+use crate::widgets::toc_panel::TocMode;
 use crate::widgets::{
     AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, StatusBar, TocPanel,
     TranslationPanel,
@@ -301,12 +302,37 @@ impl EyersWindow {
         });
 
         let pdf_view = imp.pdf_view.clone();
+        let app_mode = imp.app_mode.borrow().clone();
+        let weak_self = self.downgrade();
         imp.toc_panel.connect_closure(
-            "chapter-selected",
+            "toc-entry-selected",
             false,
-            glib::closure_local!(move |_panel: &TocPanel, page_index: u32| {
-                pdf_view.scroll_to_page(page_index);
-            }),
+            glib::closure_local!(
+                move |_panel: &TocPanel, page_index: u32, annotation_cursor: Option<WordCursor>| {
+                    let Some(this) = weak_self.upgrade() else {
+                        return;
+                    };
+                    pdf_view.scroll_to_page(page_index);
+                    match app_mode {
+                        AppMode::Visual {
+                            cursor: _cursor,
+                            selection_anchor: _,
+                        } => {
+                            if let Some(cursor) = annotation_cursor {
+                                this.move_cursor(cursor);
+                                return;
+                            }
+                            if let Some(cursor) =
+                                this.compute_word_at_viewport_offset(DEFAULT_VIEWPORT_OFFSET)
+                            {
+                                this.move_cursor(cursor);
+                            }
+                        }
+
+                        AppMode::Normal => {}
+                    };
+                }
+            ),
         );
     }
 
@@ -1450,6 +1476,9 @@ impl EyersWindow {
         }
     }
 
+    // TODO
+    // fn update_cursor_from_annotation()
+
     fn update_cursor(&self, new_cursor: WordCursor) {
         {
             let mut mode = self.imp().app_mode.borrow_mut();
@@ -1574,9 +1603,22 @@ impl EyersWindow {
     fn toggle_toc_panel(&self) {
         let imp = self.imp();
         let is_visible = imp.toc_panel.is_visible();
-        imp.toc_panel.set_visible(!is_visible);
+        let toc_panel = self.toc_panel();
+
+        if is_visible {
+            match toc_panel.toc_mode() {
+                TocMode::Chapters => {
+                    toc_panel.set_toc_mode(TocMode::Annotations);
+                }
+                TocMode::Annotations => {
+                    toc_panel.set_toc_mode(TocMode::Chapters);
+                    toc_panel.set_visible(false);
+                }
+            }
+        }
 
         if !is_visible {
+            imp.toc_panel.set_visible(true);
             imp.toc_panel.grab_focus();
             let current_page = imp.pdf_view.current_page();
             imp.toc_panel.select_current_chapter(current_page);
@@ -1816,10 +1858,10 @@ impl EyersWindow {
             .replace(Some(path.to_string_lossy().to_string()));
 
         self.init_text_cache();
-        self.extract_and_populate_bookmarks();
-
         // Load annotations for this PDF
         self.reload_annotations();
+
+        self.extract_and_populate_toc_entries();
 
         // Reset to Normal mode when loading new PDF
         {
@@ -1863,9 +1905,11 @@ impl EyersWindow {
         }
     }
 
-    fn extract_and_populate_bookmarks(&self) {
+    fn extract_and_populate_toc_entries(&self) {
         let bookmarks = self.imp().pdf_view.bookmarks();
-        self.imp().toc_panel.populate(&bookmarks);
+        self.imp().toc_panel.populate_chapters(&bookmarks);
+        let annotations = self.imp().annotations.borrow();
+        self.imp().toc_panel.populate_annotations(&annotations);
     }
 
     pub fn header_bar(&self) -> &EyersHeaderBar {

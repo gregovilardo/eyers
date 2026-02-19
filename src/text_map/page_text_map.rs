@@ -205,10 +205,10 @@ impl PageTextMap {
         // 4. reorder the words slice according to sorted indices
         Self::reorder_words_by_indices(words, &sorted_by_line_and_x);
 
-        println!("avg_height {avg_height}");
-        println!("indices {indices:?}");
-        println!("line_y_centers {line_y_centers:?}");
-        println!("sorted_by_line_and_x {sorted_by_line_and_x:?}");
+        // println!("avg_height {avg_height}");
+        // println!("indices {indices:?}");
+        // println!("line_y_centers {line_y_centers:?}");
+        // println!("sorted_by_line_and_x {sorted_by_line_and_x:?}");
 
         // 5. build LineInfo objects from the reordered words and line y-centers
         Self::build_line_infos(words, &line_y_centers)

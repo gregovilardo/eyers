@@ -47,8 +47,8 @@ mod imp {
         /// Tracks which pages have been rendered at current zoom level
         pub(super) rendered_pages: RefCell<HashSet<usize>>,
         pub selection_start: RefCell<Option<SelectionPoint>>,
-        pub current_page: Cell<u16>,
-        pub total_pages: Cell<u16>,
+        pub current_page: Cell<u32>,
+        pub total_pages: Cell<u32>,
         pub pending_update: Cell<bool>,
         pub visual_cursor: RefCell<Option<WordCursor>>,
         pub visual_selection: RefCell<Option<(WordCursor, WordCursor)>>,
@@ -609,15 +609,15 @@ impl PdfView {
         self.imp().document.borrow().is_some()
     }
 
-    pub fn current_page(&self) -> u16 {
+    pub fn current_page(&self) -> u32 {
         self.imp().current_page.get()
     }
 
-    pub fn total_pages(&self) -> u16 {
+    pub fn total_pages(&self) -> u32 {
         self.imp().total_pages.get()
     }
 
-    pub fn set_total_pages(&self, pages: u16) {
+    pub fn set_total_pages(&self, pages: u32) {
         self.imp().total_pages.set(pages);
     }
 

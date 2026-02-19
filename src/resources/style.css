@@ -18,8 +18,25 @@
     background: transparent;
 }
 
-.toc-entry {
+.toc-title {
     padding: 8px 16px;
+}
+
+.toc-annotation-title {
+    padding: 8px 16px;
+    color: #28627d61;
+}
+
+toc-annotation-subtitle {
+    padding: 8px 16px;
+}
+
+list row:selected .toc-annotation-title {
+    color: #8adaff9e;
+}
+
+.toc-page-index {
+    color: rgba(0, 0, 0, 0.5);
 }
 
 /* Translation Panel */

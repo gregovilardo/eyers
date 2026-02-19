@@ -1,10 +1,13 @@
+use gtk::glib;
 use rusqlite::{Connection, OpenFlags, params};
 use std::path::PathBuf;
+
+use crate::modes::WordCursor;
 
 pub type AnnotationId = i64;
 
 /// Represents an annotation on a PDF document
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Annotation {
     pub id: AnnotationId,
     pub pdf_path: String,
@@ -23,6 +26,12 @@ pub struct Annotation {
 pub enum AnnotationError {
     DatabaseError(String),
     NotFound,
+}
+
+impl Annotation {
+    pub fn get_start_word_cursor(&self) -> WordCursor {
+        WordCursor::new(self.start_page, self.start_word)
+    }
 }
 
 impl std::fmt::Display for AnnotationError {

@@ -1,7 +1,7 @@
 use gtk::glib;
 
 /// Represents a position in the document (page + word)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, glib::Boxed)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, glib::Boxed)]
 #[boxed_type(name = "WordCursor", nullable)]
 pub struct WordCursor {
     pub page_index: usize,

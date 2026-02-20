@@ -27,6 +27,13 @@ use crate::widgets::{
 
 const DEFAULT_VIEWPORT_OFFSET: f64 = 0.2;
 
+#[derive(Debug, Clone, Default)]
+pub(super) struct MouseSelectionState {
+    is_dragging: bool,
+    start_cursor: Option<WordCursor>,
+    drag_start_page: Option<usize>,
+}
+
 mod imp {
     use super::*;
 
@@ -57,6 +64,8 @@ mod imp {
         pub annotations: RefCell<Vec<Annotation>>,
         /// Pending annotation state: (start, end) cursors being annotated
         pub pending_annotation: RefCell<Option<(WordCursor, WordCursor)>>,
+        /// Mouse selection state for drag-to-select
+        pub mouse_selection_state: RefCell<MouseSelectionState>,
     }
 
     impl Default for EyersWindow {
@@ -89,6 +98,7 @@ mod imp {
                 current_pdf_path: RefCell::new(None),
                 annotations: RefCell::new(Vec::new()),
                 pending_annotation: RefCell::new(None),
+                mouse_selection_state: RefCell::new(MouseSelectionState::default()),
             }
         }
     }
@@ -214,6 +224,7 @@ impl EyersWindow {
         self.setup_annotate_button();
         self.setup_toc_panel();
         self.setup_scroll_tracking();
+        self.setup_drag_selection();
         self.setup_page_indicator_label();
     }
 
@@ -290,6 +301,42 @@ impl EyersWindow {
                 panel.translate(text.to_string());
             }),
         );
+    }
+
+    fn setup_drag_selection(&self) {
+        let imp = self.imp();
+
+        // Connect drag-started signal
+        let weak_self = self.downgrade();
+        imp.pdf_view
+            .connect_local("drag-started", false, move |values| {
+                let window = weak_self.upgrade()?;
+                let x = values.get(1)?.get::<f64>().ok()?;
+                let y = values.get(2)?.get::<f64>().ok()?;
+                let page_index = values.get(3)?.get::<u32>().ok()? as usize;
+                window.handle_drag_started(x, y, page_index);
+                None
+            });
+
+        // Connect drag-motion signal
+        let weak_self = self.downgrade();
+        imp.pdf_view
+            .connect_local("drag-motion", false, move |values| {
+                let window = weak_self.upgrade()?;
+                let x = values.get(1)?.get::<f64>().ok()?;
+                let y = values.get(2)?.get::<f64>().ok()?;
+                window.handle_drag_motion(x, y);
+                None
+            });
+
+        // Connect drag-ended signal
+        let weak_self = self.downgrade();
+        imp.pdf_view
+            .connect_local("drag-ended", false, move |_values| {
+                let window = weak_self.upgrade()?;
+                window.handle_drag_ended();
+                None
+            });
     }
 
     fn setup_toc_panel(&self) {
@@ -2456,5 +2503,221 @@ impl EyersWindow {
 
     pub fn annotation_panel(&self) -> &AnnotationPanel {
         &self.imp().annotation_panel
+    }
+
+    /// Handle drag started event from PdfView
+    fn handle_drag_started(&self, x: f64, y: f64, page_index: usize) {
+        // 1. Check if definitions_enabled - return early if true
+        if self.pdf_view().definitions_enabled() {
+            return;
+        }
+
+        // 2. Convert start coordinates to WordCursor
+        let start_cursor = match self.coords_to_word_cursor(x, y, Some(page_index)) {
+            Some(cursor) => cursor,
+            None => return, // Click didn't land on a word
+        };
+
+        // 3. Update MouseSelectionState
+        let mut state = self.imp().mouse_selection_state.borrow_mut();
+        state.is_dragging = true;
+        state.start_cursor = Some(start_cursor.clone());
+        state.drag_start_page = Some(page_index);
+        drop(state);
+
+        // 4. Enter Visual mode with cursor only (no selection yet)
+        let mut mode = self.imp().app_mode.borrow_mut();
+        *mode = AppMode::Visual {
+            cursor: start_cursor,
+            selection_anchor: None,
+        };
+        drop(mode);
+
+        // 5. Sync cursor to PdfView and update displays
+        self.imp().pdf_view.set_cursor(Some(start_cursor));
+        self.update_mode_display();
+        self.update_selection_display();
+    }
+
+    /// Handle drag motion event from PdfView
+    fn handle_drag_motion(&self, x: f64, y: f64) {
+        // 1. Check if definitions_enabled - return early if true
+        if self.pdf_view().definitions_enabled() {
+            return;
+        }
+
+        // 2. Check if we're actually dragging
+        let state = self.imp().mouse_selection_state.borrow();
+        if !state.is_dragging {
+            return;
+        }
+        let start_cursor = match &state.start_cursor {
+            Some(c) => c.clone(),
+            None => return,
+        };
+        drop(state);
+
+        // 3. Convert current position to WordCursor (None means detect page)
+        let current_cursor = match self.coords_to_word_cursor(x, y, None) {
+            Some(cursor) => cursor,
+            None => return, // Mouse not over any word
+        };
+
+        // 4. OPTIMIZATION: Skip if we're still on the same word
+        let mode = self.imp().app_mode.borrow();
+        if let AppMode::Visual { cursor, .. } = &*mode {
+            if cursor.page_index == current_cursor.page_index
+                && cursor.word_index == current_cursor.word_index
+            {
+                return; // No change, skip update
+            }
+        }
+        drop(mode);
+
+        // 5. Determine anchor and cursor based on drag direction
+        let (anchor, cursor) = if current_cursor < start_cursor {
+            // Dragging backward - swap them
+            (current_cursor, start_cursor)
+        } else {
+            // Dragging forward - keep natural order
+            (start_cursor, current_cursor)
+        };
+
+        // 6. Update AppMode with active selection
+        let mut mode = self.imp().app_mode.borrow_mut();
+        *mode = AppMode::Visual {
+            cursor,
+            selection_anchor: Some(anchor),
+        };
+        drop(mode);
+
+        // 7. Sync to PdfView and redraw highlights
+        self.imp().pdf_view.set_cursor(Some(cursor));
+        self.update_selection_display();
+    }
+
+    /// Handle drag ended event from PdfView
+    fn handle_drag_ended(&self) {
+        // 1. Check if definitions_enabled - return early if true
+        if self.pdf_view().definitions_enabled() {
+            return;
+        }
+
+        // 2. Check if we were actually dragging
+        let mut state = self.imp().mouse_selection_state.borrow_mut();
+        if !state.is_dragging {
+            return;
+        }
+
+        // 3. Clear drag state
+        state.is_dragging = false;
+        state.start_cursor = None;
+        state.drag_start_page = None;
+        drop(state);
+
+        // 4. AppMode is already Visual with selection active
+        // User can now press 'y' to copy, or use keyboard to extend
+        // We do NOT exit Visual mode here
+    }
+
+    /// Convert screen coordinates to WordCursor
+    /// - If relative_to_page is Some(page_index), coordinates are relative to that page
+    /// - If None, coordinates are global and we detect which page they're on
+    fn coords_to_word_cursor(
+        &self,
+        x: f64,
+        y: f64,
+        relative_to_page: Option<usize>,
+    ) -> Option<WordCursor> {
+        if let Some(page_index) = relative_to_page {
+            // Case 1: We know which page (drag start)
+            self.coords_to_word_on_page(x, y, page_index)
+        } else {
+            // Case 2: Global motion - need to find which page
+            self.find_page_at_coordinates(x, y)
+                .and_then(|(page_index, local_x, local_y)| {
+                    self.coords_to_word_on_page(local_x, local_y, page_index)
+                })
+        }
+    }
+
+    /// Convert coordinates on a specific page to WordCursor
+    fn coords_to_word_on_page(&self, x: f64, y: f64, page_index: usize) -> Option<WordCursor> {
+        let pdf_view = self.pdf_view();
+
+        // Get the document
+        let doc_borrow = pdf_view.document();
+        let doc = doc_borrow.as_ref()?;
+
+        // Get the page
+        let page = doc.pages().get(page_index as u16).ok()?;
+
+        // Get the picture for offset calculation
+        let picture = pdf_view.get_page_picture(page_index)?;
+
+        // Calculate offset and zoom
+        let offset = calculate_picture_offset(&picture);
+        let zoom = pdf_view.zoom_level();
+
+        // Convert screen coordinates to PDF coordinates
+        let click = crate::services::pdf_text::calculate_click_coordinates_with_offset(
+            x, y, &page, offset, zoom,
+        );
+
+        // Get the text page
+        let text_page = page.text().ok()?;
+
+        // Find the character index at the click position
+        let char_idx = crate::services::pdf_text::find_char_index_at_click(&text_page, &click)?;
+
+        // Get or build the text map for this page
+        let mut cache = self.imp().text_cache.borrow_mut();
+        let cache = cache.as_mut()?;
+        let text_map = cache.get_or_build(page_index, doc)?;
+
+        // Find the word that contains this character index
+        for (word_index, word) in text_map.words.iter().enumerate() {
+            if char_idx >= word.char_start && char_idx < word.char_end {
+                return Some(WordCursor {
+                    page_index,
+                    word_index,
+                });
+            }
+        }
+
+        None
+    }
+
+    /// Find which page contains the given global coordinates
+    /// Returns (page_index, local_x, local_y) if found
+    fn find_page_at_coordinates(&self, x: f64, y: f64) -> Option<(usize, f64, f64)> {
+        let pdf_view = self.pdf_view();
+        let page_count = pdf_view.page_count();
+
+        // Iterate through all page overlays to find which one contains the point
+        for page_index in 0..page_count {
+            if let Some(overlay) = pdf_view.get_page_overlay(page_index) {
+                // Try to translate coordinates from PdfView to this overlay
+                if let Some((local_x, local_y)) = pdf_view.translate_coordinates(&overlay, x, y) {
+                    // Check if the point is within the overlay's bounds
+                    let width = overlay.width() as f64;
+                    let height = overlay.height() as f64;
+
+                    if local_x >= 0.0 && local_x <= width && local_y >= 0.0 && local_y <= height {
+                        // Found the page! Now we need to get coordinates relative to the Picture
+                        if let Some(picture) = pdf_view.get_page_picture(page_index) {
+                            // Translate from overlay to picture
+                            if let Some((pic_x, pic_y)) =
+                                overlay.translate_coordinates(&picture, local_x, local_y)
+                            {
+                                return Some((page_index, pic_x, pic_y));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 }

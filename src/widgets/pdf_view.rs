@@ -3,7 +3,7 @@ use glib::Properties;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{Box, GestureClick, Orientation, Overlay, Picture};
+use gtk::{Box, EventControllerMotion, GestureClick, GestureDrag, Orientation, Overlay, Picture};
 use pdfium_render::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
@@ -111,6 +111,13 @@ mod imp {
                     Signal::builder("current-page-updated")
                         .param_types([u32::static_type(), u32::static_type()])
                         .build(),
+                    Signal::builder("drag-started")
+                        .param_types([f64::static_type(), f64::static_type(), u32::static_type()])
+                        .build(),
+                    Signal::builder("drag-motion")
+                        .param_types([f64::static_type(), f64::static_type()])
+                        .build(),
+                    Signal::builder("drag-ended").build(),
                 ]
             })
         }
@@ -135,6 +142,7 @@ impl PdfView {
         self.set_orientation(Orientation::Vertical);
         self.set_spacing(10);
         self.setup_scroll_tracking();
+        self.setup_motion_tracking();
     }
 
     pub fn set_pdfium(&self, pdfium: &'static Pdfium) {
@@ -231,6 +239,7 @@ impl PdfView {
             overlay.add_overlay(&highlight);
 
             self.setup_page_gesture(&picture, index);
+            self.setup_page_drag_gesture(&picture, index);
             self.append(&overlay);
 
             page_pictures.push(picture);
@@ -387,6 +396,29 @@ impl PdfView {
         gesture.connect_pressed(move |_, _, x, y| {
             if let Some(view) = view_weak.upgrade() {
                 view.handle_page_click(x, y, page_index);
+            }
+        });
+
+        picture.add_controller(gesture);
+    }
+
+    fn setup_page_drag_gesture(&self, picture: &Picture, page_index: usize) {
+        let gesture = GestureDrag::new();
+        let view_weak = self.downgrade();
+
+        let view_weak_begin = view_weak.clone();
+        gesture.connect_drag_begin(move |_, start_x, start_y| {
+            if let Some(view) = view_weak_begin.upgrade() {
+                view.emit_by_name::<()>(
+                    "drag-started",
+                    &[&start_x, &start_y, &(page_index as u32)],
+                );
+            }
+        });
+
+        gesture.connect_drag_end(move |_, _offset_x, _offset_y| {
+            if let Some(view) = view_weak.upgrade() {
+                view.emit_by_name::<()>("drag-ended", &[]);
             }
         });
 
@@ -628,6 +660,19 @@ impl PdfView {
         self.add_controller(scroll_controller);
     }
 
+    fn setup_motion_tracking(&self) {
+        let motion_controller = EventControllerMotion::new();
+        let view_weak = self.downgrade();
+
+        motion_controller.connect_motion(move |_, x, y| {
+            if let Some(view) = view_weak.upgrade() {
+                view.emit_by_name::<()>("drag-motion", &[&x, &y]);
+            }
+        });
+
+        self.add_controller(motion_controller);
+    }
+
     pub(crate) fn schedule_page_update(&self) {
         let imp = self.imp();
 
@@ -824,6 +869,21 @@ impl PdfView {
 
         // Render only visible pages
         self.render_visible_pages();
+    }
+
+    /// Get a reference to a page's Picture widget
+    pub fn get_page_picture(&self, page_index: usize) -> Option<Picture> {
+        self.imp().page_pictures.borrow().get(page_index).cloned()
+    }
+
+    /// Get a reference to a page's Overlay widget
+    pub fn get_page_overlay(&self, page_index: usize) -> Option<Overlay> {
+        self.imp().page_overlays.borrow().get(page_index).cloned()
+    }
+
+    /// Get the total number of pages
+    pub fn page_count(&self) -> usize {
+        self.imp().page_pictures.borrow().len()
     }
 }
 

@@ -1,16 +1,16 @@
 use crate::modes::WordCursor;
 use crate::objects::annotation_object::AnnotationObject;
 use crate::services::annotations::Annotation;
+use glib::signal::SignalHandlerId;
 use glib::subclass::Signal;
+use gtk::glib;
+use gtk::prelude::*;
+use gtk::subclass::prelude::*;
 use gtk::CustomSorter;
 use gtk::ListView;
 use gtk::Stack;
-use gtk::glib;
-use gtk::glib::property::PropertyGet;
-use gtk::prelude::*;
-use gtk::subclass::prelude::*;
-use gtk::{Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, gio};
-use std::cell::{Cell, OnceCell};
+use gtk::{gio, Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::sync::OnceLock;
 
 use crate::services::bookmarks::BookmarkEntry;
@@ -54,6 +54,8 @@ mod imp {
         pub delete_button: Button,
         pub button_box: Box,
         pub annotation_id: Cell<i64>,
+        pub edit_handler_id: RefCell<Option<SignalHandlerId>>,
+        pub delete_handler_id: RefCell<Option<SignalHandlerId>>,
     }
 
     #[glib::object_subclass]
@@ -386,25 +388,57 @@ impl TocPanel {
 
             row_widget.bind_data(&data_obj);
 
+            let imp = row_widget.imp();
+
+            // Disconnect previous handlers if they exist
+            if let Some(handler_id) = imp.edit_handler_id.borrow_mut().take() {
+                imp.edit_button.disconnect(handler_id);
+            }
+            if let Some(handler_id) = imp.delete_handler_id.borrow_mut().take() {
+                imp.delete_button.disconnect(handler_id);
+            }
+
             // Connect buttons
             let annotation_id = data_obj.annotation().id;
 
             // Edit button
             let panel_weak_clone = panel_weak.clone();
-            row_widget.edit_button().connect_clicked(move |_| {
+            let handler_id = imp.edit_button.connect_clicked(move |_| {
                 if let Some(panel) = panel_weak_clone.upgrade() {
                     panel.emit_by_name::<()>("annotation-edit-requested", &[&annotation_id]);
                 }
             });
+            imp.edit_handler_id.replace(Some(handler_id));
 
             // Delete button
             let panel_weak_clone = panel_weak.clone();
-            row_widget.delete_button().connect_clicked(move |_| {
+            let handler_id = imp.delete_button.connect_clicked(move |_| {
                 if let Some(panel) = panel_weak_clone.upgrade() {
                     panel.emit_by_name::<()>("annotation-delete-requested", &[&annotation_id]);
                 }
             });
+            imp.delete_handler_id.replace(Some(handler_id));
         });
+
+        // Add unbind handler to clean up when widgets are recycled
+        factory.connect_unbind(move |_, list_item| {
+            let list_item = list_item
+                .downcast_ref::<gtk::ListItem>()
+                .expect("Debe ser un ListItem");
+
+            if let Some(row_widget) = list_item.child().and_downcast::<TocAnnotationRow>() {
+                let imp = row_widget.imp();
+
+                // Disconnect handlers when unbinding
+                if let Some(handler_id) = imp.edit_handler_id.borrow_mut().take() {
+                    imp.edit_button.disconnect(handler_id);
+                }
+                if let Some(handler_id) = imp.delete_handler_id.borrow_mut().take() {
+                    imp.delete_button.disconnect(handler_id);
+                }
+            }
+        });
+
         factory
     }
 
@@ -624,15 +658,17 @@ impl TocPanel {
                     .model()
                     .and_downcast::<gtk::SingleSelection>()
                 {
-                    let n_items = selection_model.model().unwrap().n_items();
-                    if n_items > 0 {
-                        selection_model.set_selected(n_items - 1);
-                        imp.list_view_annotations.scroll_to(
-                            n_items - 1,
-                            gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS,
-                            None,
-                        );
-                        imp.list_view_annotations.grab_focus();
+                    if let Some(model) = selection_model.model() {
+                        let n_items = model.n_items();
+                        if n_items > 0 {
+                            selection_model.set_selected(n_items - 1);
+                            imp.list_view_annotations.scroll_to(
+                                n_items - 1,
+                                gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS,
+                                None,
+                            );
+                            imp.list_view_annotations.grab_focus();
+                        }
                     }
                 }
             }
@@ -670,19 +706,21 @@ impl TocPanel {
             .model()
             .and_downcast::<gtk::SingleSelection>()
         {
-            let current_pos = selection_model.selected();
-            let n_items = selection_model.model().unwrap().n_items();
-            if current_pos < n_items - 1 {
-                println!("seleccionando posicion {current_pos}+1");
-                selection_model.select_item(current_pos + 1, true);
-                selection_model.set_selected(current_pos + 1);
-                imp.list_view_annotations.scroll_to(
-                    current_pos + 1,
-                    gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS,
-                    None,
-                );
-                imp.list_view_annotations.grab_focus();
-                return true;
+            if let Some(model) = selection_model.model() {
+                let current_pos = selection_model.selected();
+                let n_items = model.n_items();
+                if n_items > 0 && current_pos < n_items - 1 {
+                    println!("seleccionando posicion {current_pos}+1");
+                    selection_model.select_item(current_pos + 1, true);
+                    selection_model.set_selected(current_pos + 1);
+                    imp.list_view_annotations.scroll_to(
+                        current_pos + 1,
+                        gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS,
+                        None,
+                    );
+                    imp.list_view_annotations.grab_focus();
+                    return true;
+                }
             }
         }
         false

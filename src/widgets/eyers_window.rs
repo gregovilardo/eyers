@@ -2515,7 +2515,18 @@ impl EyersWindow {
         // 2. Convert start coordinates to WordCursor
         let start_cursor = match self.coords_to_word_cursor(x, y, Some(page_index)) {
             Some(cursor) => cursor,
-            None => return, // Click didn't land on a word
+            None => {
+                // Click didn't land on a word - return to Normal mode
+                let mut mode = self.imp().app_mode.borrow_mut();
+                *mode = AppMode::Normal;
+                drop(mode);
+
+                self.imp().pdf_view.set_cursor(None);
+                self.imp().pdf_view.clear_selection();
+                self.update_mode_display();
+                self.update_highlights();
+                return;
+            }
         };
 
         // 3. Update MouseSelectionState
@@ -2615,9 +2626,30 @@ impl EyersWindow {
         state.drag_start_page = None;
         drop(state);
 
-        // 4. AppMode is already Visual with selection active
-        // User can now press 'y' to copy, or use keyboard to extend
-        // We do NOT exit Visual mode here
+        // 4. Check if there's an active selection
+        let mode = self.imp().app_mode.borrow();
+        let has_selection = if let AppMode::Visual {
+            selection_anchor, ..
+        } = &*mode
+        {
+            selection_anchor.is_some()
+        } else {
+            false
+        };
+        drop(mode);
+
+        // 5. If no selection was made (just a click, no drag), return to Normal mode
+        if !has_selection {
+            let mut mode = self.imp().app_mode.borrow_mut();
+            *mode = AppMode::Normal;
+            drop(mode);
+
+            self.imp().pdf_view.set_cursor(None);
+            self.imp().pdf_view.clear_selection();
+            self.update_mode_display();
+            self.update_highlights();
+        }
+        // Otherwise, stay in Visual mode with the selection active
     }
 
     /// Convert screen coordinates to WordCursor

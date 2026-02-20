@@ -471,7 +471,7 @@ impl TocPanel {
         }
     }
 
-    pub fn select_next(&self) {
+    pub fn select_next(&self) -> bool {
         let list_box = self.get_current_list_box();
 
         if let Some(current) = list_box.selected_row() {
@@ -479,12 +479,14 @@ impl TocPanel {
                 if let Some(next) = next_widget.downcast_ref::<ListBoxRow>() {
                     list_box.select_row(Some(next));
                     next.grab_focus();
+                    return true;
                 }
             }
         }
+        false
     }
 
-    pub fn select_prev(&self) {
+    pub fn select_prev(&self) -> bool {
         let list_box = self.get_current_list_box();
 
         if let Some(current) = list_box.selected_row() {
@@ -492,9 +494,11 @@ impl TocPanel {
                 if let Some(prev) = prev_widget.downcast_ref::<ListBoxRow>() {
                     list_box.select_row(Some(prev));
                     prev.grab_focus();
+                    return true;
                 }
             }
         }
+        false
     }
 
     pub fn navigate_and_close(&self) {

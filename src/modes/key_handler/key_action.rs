@@ -39,7 +39,7 @@ pub enum KeyAction {
 
     // === TOC Navigation ===
     ScrollTOC(ScrollDir),
-    SelectChapter,
+    SelectTocRow,
 
     // === Mode Changes ===
     EnterVisual,

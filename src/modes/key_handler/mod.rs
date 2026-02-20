@@ -6,6 +6,6 @@ mod processing;
 pub use handler::KeyHandler;
 pub use key_action::{KeyAction, ScrollDir};
 pub use processing::{
-    handle_normal_mode_key, handle_post_global_key, handle_pre_global_key, handle_visual_mode_key,
-    KeyResult,
+    KeyResult, handle_normal_mode_key, handle_post_global_key, handle_pre_global_key,
+    handle_toc_key, handle_visual_mode_key,
 };

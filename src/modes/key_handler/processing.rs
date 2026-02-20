@@ -42,12 +42,35 @@ impl KeyResult {
     }
 }
 
+pub fn handle_toc_key(
+    handler: &KeyHandler,
+    keyval: gdk::Key,
+    modifiers: ModifierType,
+) -> KeyResult {
+    // Handle number accumulation
+    if let Some(digit) = get_number_from_key(keyval) {
+        handler.accumulate_digit(digit);
+        return KeyResult::StateChanged;
+    }
+
+    match keyval {
+        gdk::Key::Escape => {
+            handler.reset();
+            KeyResult::Action(KeyAction::None)
+        }
+        gdk::Key::j | gdk::Key::Down => KeyResult::Action(KeyAction::ScrollTOC(ScrollDir::Down)),
+        gdk::Key::k | gdk::Key::Up => KeyResult::Action(KeyAction::ScrollTOC(ScrollDir::Up)),
+        gdk::Key::Tab => KeyResult::Action(KeyAction::ToggleTOC),
+        gdk::Key::Return => KeyResult::Action(KeyAction::SelectTocRow),
+        _ => KeyResult::Unhandled,
+    }
+}
+
 /// Process global keys that should be handled first (before mode-specific)
 pub fn handle_pre_global_key(
     handler: &KeyHandler,
     keyval: gdk::Key,
     modifiers: ModifierType,
-    is_toc_visible: bool,
 ) -> KeyResult {
     // Handle Ctrl+key combinations
     if modifiers.contains(ModifierType::CONTROL_MASK) {
@@ -104,21 +127,6 @@ pub fn handle_pre_global_key(
             KeyResult::Action(KeyAction::None)
         }
         gdk::Key::Tab => KeyResult::Action(KeyAction::ToggleTOC),
-        gdk::Key::j | gdk::Key::Down => {
-            if is_toc_visible {
-                KeyResult::Action(KeyAction::ScrollTOC(ScrollDir::Down))
-            } else {
-                KeyResult::Unhandled
-            }
-        }
-        gdk::Key::k | gdk::Key::Up => {
-            if is_toc_visible {
-                KeyResult::Action(KeyAction::ScrollTOC(ScrollDir::Up))
-            } else {
-                KeyResult::Unhandled
-            }
-        }
-        gdk::Key::Return => KeyResult::Action(KeyAction::SelectChapter),
         gdk::Key::g => {
             handler.set_input_state(InputState::PendingG);
             KeyResult::StateChanged

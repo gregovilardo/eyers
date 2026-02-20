@@ -9,10 +9,9 @@ use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::Path;
 
-use crate::modes::app_mode;
 use crate::modes::{
     AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
-    handle_post_global_key, handle_pre_global_key, handle_visual_mode_key,
+    handle_post_global_key, handle_pre_global_key, handle_toc_key, handle_visual_mode_key,
 };
 use crate::services::annotations::find_next_annotation_at_position;
 use crate::services::annotations::find_prev_annotation_at_position;
@@ -343,10 +342,23 @@ impl EyersWindow {
         controller.connect_key_pressed(move |_, key, _, modifiers| {
             if let Some(window) = window_weak.upgrade() {
                 let imp = window.imp();
-                let toc_visible = imp.toc_panel.is_visible();
+                let is_toc_visible = imp.toc_panel.is_visible();
+                if is_toc_visible {
+                    match handle_toc_key(&imp.key_handler, key, modifiers) {
+                        KeyResult::Action(action) => {
+                            if window.execute_key_action(action) {
+                                return glib::Propagation::Stop;
+                            }
+                        }
+                        KeyResult::StateChanged => {
+                            return glib::Propagation::Stop;
+                        }
+                        KeyResult::Unhandled => return glib::Propagation::Stop,
+                    }
+                }
 
                 // Try pre-global keys first
-                match handle_pre_global_key(&imp.key_handler, key, modifiers, toc_visible) {
+                match handle_pre_global_key(&imp.key_handler, key, modifiers) {
                     KeyResult::Action(action) => {
                         if window.execute_key_action(action) {
                             return glib::Propagation::Stop;
@@ -429,7 +441,7 @@ impl EyersWindow {
                 true
             }
 
-            KeyAction::SelectChapter => {
+            KeyAction::SelectTocRow => {
                 self.toc_panel().navigate_and_close();
                 true
             }
@@ -445,12 +457,26 @@ impl EyersWindow {
             }
 
             KeyAction::ScrollTOC(ScrollDir::Down) => {
-                self.toc_panel().select_next();
+                let repeat = self.key_handler().count();
+                self.key_handler().reset();
+                for _ in 0..repeat {
+                    let result = self.toc_panel().select_next();
+                    if !result {
+                        break;
+                    }
+                }
                 true
             }
 
             KeyAction::ScrollTOC(ScrollDir::Up) => {
-                self.toc_panel().select_prev();
+                let repeat = self.key_handler().count();
+                self.key_handler().reset();
+                for _ in 0..repeat {
+                    let result = self.toc_panel().select_prev();
+                    if !result {
+                        break;
+                    }
+                }
                 true
             }
 

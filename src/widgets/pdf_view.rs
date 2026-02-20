@@ -1,5 +1,5 @@
-use glib::subclass::Signal;
 use glib::Properties;
+use glib::subclass::Signal;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -341,14 +341,6 @@ impl PdfView {
         _overlay: &Overlay,
         highlight: &HighlightOverlay,
     ) {
-        // !TODO: remove comment code
-        // if let Ok(media_box) = page.boundaries().media() {
-        //     println!("mediabox {media_box:#?}");
-        // }
-        // if let Ok(crop_box) = page.boundaries().crop() {
-        //     println!("crop_boxl {crop_box:#?}");
-        // }
-
         let zoom = self.imp().zoom_level.get();
         let config = create_render_config_with_zoom(zoom);
 
@@ -563,7 +555,6 @@ impl PdfView {
     }
 
     pub fn scroll_to_page(&self, page_index: u16) {
-        println!("scrolling to page {}", page_index);
         if let Some(scrolled) = self.find_scrolled_window() {
             //TODO: find if you can stop the scroll of mouse so it can set value of adjustment
             //right

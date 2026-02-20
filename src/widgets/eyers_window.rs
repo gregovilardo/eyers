@@ -208,11 +208,11 @@ impl EyersWindow {
         // Bind key handler status-text to status bar
         self.setup_key_handler_binding();
 
+        self.setup_keyboard_controller();
         self.setup_translation_panel();
         self.setup_annotation_panel();
         self.setup_annotate_button();
         self.setup_toc_panel();
-        self.setup_keyboard_controller();
         self.setup_scroll_tracking();
         self.setup_page_indicator_label();
     }
@@ -337,6 +337,7 @@ impl EyersWindow {
 
     fn setup_keyboard_controller(&self) {
         let controller = gtk::EventControllerKey::new();
+        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         let window_weak = self.downgrade();
 
         controller.connect_key_pressed(move |_, key, _, modifiers| {
@@ -443,6 +444,7 @@ impl EyersWindow {
 
             KeyAction::SelectTocRow => {
                 self.toc_panel().navigate_and_close();
+                self.toc_panel().set_toc_mode(TocMode::Chapters);
                 true
             }
 
@@ -776,7 +778,6 @@ impl EyersWindow {
         let doc = doc_borrow.as_ref()?;
 
         let mut cache = imp.text_cache.borrow_mut();
-        println!("first word {:#?}", cache);
 
         let cache = cache.as_mut()?;
 
@@ -2146,7 +2147,7 @@ impl EyersWindow {
                 self.reload_annotations();
                 self.update_annotation_highlights();
                 if let Ok(annotation) = annotations::get_annotation(id) {
-                    self.imp().toc_panel.update_listbox_annotations(annotation);
+                    self.imp().toc_panel.update_list_annotations(annotation);
                 }
             }
             Err(e) => {

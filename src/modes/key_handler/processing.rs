@@ -53,6 +53,8 @@ pub fn handle_toc_key(
         return KeyResult::StateChanged;
     }
 
+    println!("olis");
+    println!("{:#?}", keyval);
     match keyval {
         gdk::Key::Escape => {
             handler.reset();

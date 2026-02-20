@@ -1,12 +1,16 @@
 use crate::modes::WordCursor;
+use crate::objects::annotation_object::AnnotationObject;
 use crate::services::annotations::Annotation;
 use glib::subclass::Signal;
+use gtk::CustomSorter;
+use gtk::ListView;
 use gtk::Stack;
 use gtk::glib;
+use gtk::glib::property::PropertyGet;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow};
-use std::cell::Cell;
+use gtk::{Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, gio};
+use std::cell::{Cell, OnceCell};
 use std::sync::OnceLock;
 
 use crate::services::bookmarks::BookmarkEntry;
@@ -19,8 +23,6 @@ pub enum TocMode {
 }
 
 mod imp {
-
-    use std::cell::RefCell;
 
     use crate::modes::WordCursor;
 
@@ -45,27 +47,29 @@ mod imp {
 
     #[derive(Default)]
     pub struct TocAnnotationRow {
-        pub page_index: Cell<u16>,
-        pub annotation: RefCell<Annotation>,
+        pub title: Label,
+        pub subtitle: Label,
+        pub page_index: Label,
     }
 
     #[glib::object_subclass]
     impl ObjectSubclass for TocAnnotationRow {
         const NAME: &'static str = "TocAnnotationRow";
         type Type = super::TocAnnotationRow;
-        type ParentType = ListBoxRow;
+        type ParentType = Box;
     }
 
     impl ObjectImpl for TocAnnotationRow {}
     impl WidgetImpl for TocAnnotationRow {}
-    impl ListBoxRowImpl for TocAnnotationRow {}
+    impl BoxImpl for TocAnnotationRow {}
 
     #[derive(Default)]
     pub struct TocPanel {
         pub title: Label,
         pub mode: Cell<TocMode>,
         pub stack: Stack,
-        pub list_box_annotations: ListBox,
+        pub annotations_store: OnceCell<gio::ListStore>,
+        pub list_view_annotations: ListView,
         pub list_box_chapters: ListBox,
         pub close_button: Button,
     }
@@ -149,60 +153,59 @@ impl TocChapterRow {
 
 glib::wrapper! {
     pub struct TocAnnotationRow(ObjectSubclass<imp::TocAnnotationRow>)
-        @extends ListBoxRow, gtk::Widget,
+        @extends Box, gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Actionable;
 }
 
 impl TocAnnotationRow {
-    pub fn new(annotation: Annotation) -> Self {
-        let page_index = &annotation.start_page;
-        let title = &annotation.selected_text;
-        let sub_title = &annotation.note;
-        let row: TocAnnotationRow = glib::Object::builder().build();
-
-        let container = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(4)
-            .margin_start(12 as i32)
-            .margin_end(12)
-            .margin_top(4)
-            .margin_bottom(4)
+    pub fn new() -> Self {
+        let row: Self = glib::Object::builder()
+            .property("orientation", gtk::Orientation::Horizontal)
+            .property("spacing", 4)
             .build();
 
-        let sub_container = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(2)
-            .build();
-
-        let label = Label::new(Some(title));
-        label.set_xalign(0.0);
-        label.set_hexpand(true);
-        label.add_css_class("toc-annotation-title");
-        sub_container.append(&label);
-
-        let label = Label::new(Some(sub_title));
-        label.set_xalign(0.1);
-        label.set_hexpand(true);
-        label.add_css_class("toc-subtitle");
-        sub_container.append(&label);
-
-        container.append(&sub_container);
-
-        let label = Label::new(Some(&page_index.to_string()));
-        label.set_xalign(0.0);
-        label.set_hexpand(false);
-        label.add_css_class("toc-page-index");
-        container.append(&label);
-
-        row.set_child(Some(&container));
-
-        row.imp().annotation.replace(annotation);
-
+        row.setup_layout();
         row
     }
 
-    pub fn page_index(&self) -> usize {
-        self.imp().annotation.borrow().start_page
+    fn setup_layout(&self) {
+        let imp = self.imp();
+        self.add_css_class("toc-annotation-row");
+
+        self.set_margin_start(12);
+        self.set_margin_end(12);
+        self.set_margin_top(4);
+        self.set_margin_bottom(4);
+
+        let sub_container = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(2)
+            .hexpand(true)
+            .build();
+
+        imp.title.set_xalign(0.0);
+        imp.title.add_css_class("toc-annotation-title");
+        sub_container.append(&imp.title);
+
+        imp.subtitle.set_xalign(0.1);
+        imp.subtitle.add_css_class("toc-subtitle");
+        sub_container.append(&imp.subtitle);
+
+        self.append(&sub_container);
+
+        imp.page_index.set_xalign(0.0);
+        imp.page_index.set_hexpand(false);
+        imp.page_index.add_css_class("toc-page-index");
+        self.append(&imp.page_index);
+    }
+
+    pub fn bind_data(&self, obj: &AnnotationObject) {
+        let imp = self.imp();
+        let data = obj.annotation();
+
+        imp.title.set_text(&data.selected_text);
+        imp.subtitle.set_text(&data.note);
+        imp.page_index.set_text(&data.start_page.to_string());
     }
 }
 
@@ -255,13 +258,23 @@ impl TocPanel {
             .set_selection_mode(gtk::SelectionMode::Single);
         imp.list_box_chapters.add_css_class("toc-list");
 
-        imp.list_box_annotations
-            .set_selection_mode(gtk::SelectionMode::Single);
-        imp.list_box_annotations.add_css_class("toc-list");
+        let store = gio::ListStore::new::<AnnotationObject>();
+        let _ = self.imp().annotations_store.set(store.clone());
+        let sorter = self.create_annotation_sorter();
+        let sort_model = gtk::SortListModel::new(Some(store), Some(sorter));
+        let selection_model = gtk::SingleSelection::new(Some(sort_model));
+        imp.list_view_annotations.set_model(Some(&selection_model));
+
+        let factory = self.create_and_bind_factory();
+        self.imp().list_view_annotations.set_factory(Some(&factory));
+        self.imp()
+            .list_view_annotations
+            .set_model(Some(&selection_model));
 
         let stack = &self.imp().stack;
         stack.add_named(&imp.list_box_chapters, Some("chapters"));
-        stack.add_named(&imp.list_box_annotations, Some("annotations"));
+        stack.add_named(&imp.list_view_annotations, Some("annotations"));
+        // self.imp().list_view_annotations.set_can_focus(false);
 
         scrolled_window.set_child(Some(stack));
 
@@ -282,19 +295,76 @@ impl TocPanel {
         });
 
         let panel_weak = self.downgrade();
-        imp.list_box_annotations
-            .connect_row_activated(move |_, row| {
+        imp.list_view_annotations
+            .connect_activate(move |list_view, position| {
                 if let Some(panel) = panel_weak.upgrade() {
-                    if let Some(entry_row) = row.downcast_ref::<TocAnnotationRow>() {
-                        let cursor =
-                            Some(entry_row.imp().annotation.borrow().get_start_word_cursor());
-                        panel.emit_by_name::<()>(
-                            "toc-entry-selected",
-                            &[&(entry_row.page_index() as u32), &cursor],
-                        );
-                    }
+                    let model = list_view.model().unwrap();
+                    let item = model
+                        .item(position)
+                        .and_downcast::<AnnotationObject>()
+                        .unwrap();
+                    println!("{:#?}", item.annotation());
+                    println!("{:#?}", item.annotation().get_start_word_cursor());
+                    panel.emit_by_name::<()>(
+                        "toc-entry-selected",
+                        &[
+                            &(item.annotation().start_page as u32),
+                            &(item.annotation().get_start_word_cursor()),
+                        ],
+                    );
                 }
             });
+    }
+
+    fn create_and_bind_factory(&self) -> gtk::SignalListItemFactory {
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(move |_, list_item| {
+            let list_item = list_item
+                .downcast_ref::<gtk::ListItem>()
+                .expect("Debe ser un ListItem");
+            let row_widget = TocAnnotationRow::new();
+
+            list_item.set_child(Some(&row_widget));
+        });
+
+        factory.connect_bind(move |_, list_item| {
+            let list_item = list_item
+                .downcast_ref::<gtk::ListItem>()
+                .expect("Debe ser un ListItem");
+
+            let data_obj = list_item.item().and_downcast::<AnnotationObject>().unwrap();
+
+            let row_widget = list_item
+                .child()
+                .and_downcast::<TocAnnotationRow>()
+                .unwrap();
+
+            row_widget.bind_data(&data_obj);
+        });
+        factory
+    }
+
+    fn create_annotation_sorter(&self) -> CustomSorter {
+        CustomSorter::new(move |obj1, obj2| {
+            let ann1 = obj1
+                .downcast_ref::<AnnotationObject>()
+                .expect("Objeto 1 no es AnnotationObject")
+                .annotation(); // Extrae el struct Annotation
+
+            let ann2 = obj2
+                .downcast_ref::<AnnotationObject>()
+                .expect("Objeto 2 no es AnnotationObject")
+                .annotation(); // Extrae el struct Annotation
+
+            // Usamos el PartialOrd de tu struct Annotation
+            if ann1 < ann2 {
+                gtk::Ordering::Smaller
+            } else if ann1 > ann2 {
+                gtk::Ordering::Larger
+            } else {
+                gtk::Ordering::Equal
+            }
+        })
     }
 
     pub fn set_toc_mode(&self, mode: TocMode) {
@@ -315,41 +385,43 @@ impl TocPanel {
         }
     }
 
-    pub fn update_listbox_annotations(&self, new_annotation: Annotation) {
-        let list = &self.imp().list_box_annotations;
+    pub fn update_list_annotations(&self, new_annotation: Annotation) {
+        let store = &self.get_store();
 
-        let mut i = 0;
-        while let Some(row) = list.row_at_index(i) {
-            if let Some(ann_row) = row.downcast_ref::<TocAnnotationRow>() {
-                let current_annotation = ann_row.imp().annotation.borrow();
-                if *current_annotation == new_annotation {
-                    println!("son igualesh");
-                    list.remove(ann_row);
-                    list.insert(&TocAnnotationRow::new(new_annotation), i);
-                    return;
-                }
-                if *current_annotation > new_annotation {
-                    list.insert(&TocAnnotationRow::new(new_annotation), i);
-                    return;
-                }
-                i += 1;
+        for i in 0..store.n_items() {
+            let item = store.item(i).and_downcast::<AnnotationObject>().unwrap();
+
+            if item.annotation().id == new_annotation.id {
+                store.remove(i);
+                break;
             }
         }
-        list.append(&TocAnnotationRow::new(new_annotation));
+
+        store.append(&AnnotationObject::new(new_annotation));
     }
 
     pub fn remove_listbox_annotation(&self, id: i64) {
-        let list = &self.imp().list_box_annotations;
-        let mut child = list.first_child();
-        while let Some(row) = child {
-            if let Some(annotation_row) = row.downcast_ref::<TocAnnotationRow>() {
-                if annotation_row.imp().annotation.borrow().get_id() == id {
-                    list.remove(annotation_row);
-                    return;
-                }
+        let store = &self.get_store();
+
+        for i in 0..store.n_items() {
+            let item = store
+                .item(i)
+                .and_downcast::<AnnotationObject>()
+                .expect("el item debe ser un annotationobject");
+
+            if item.annotation().id == id {
+                println!("Nota borrada: {}", id);
+                store.remove(i);
+                break;
             }
-            child = row.next_sibling();
         }
+    }
+
+    pub fn get_store(&self) -> &gio::ListStore {
+        self.imp()
+            .annotations_store
+            .get()
+            .expect("Store no inicializado")
     }
 
     pub fn toc_mode(&self) -> TocMode {
@@ -361,27 +433,23 @@ impl TocPanel {
     }
 
     pub fn populate_annotations(&self, entries: &[Annotation]) {
-        let imp = self.imp();
+        let store = self
+            .imp()
+            .annotations_store
+            .get()
+            .expect("El store no ha sido inicializado");
 
-        while let Some(row) = imp.list_box_annotations.first_child() {
-            imp.list_box_annotations.remove(&row);
-        }
+        store.remove_all();
 
-        if entries.is_empty() {
-            let label = Label::new(Some("No annotation found"));
-            label.set_margin_start(12);
-            label.set_margin_end(12);
-            label.set_margin_top(12);
-            label.set_margin_bottom(12);
-            label.set_xalign(0.0);
-            label.set_opacity(0.6);
-            imp.list_box_annotations.append(&label);
-        } else {
+        if !entries.is_empty() {
             for entry in entries {
-                let entry_row = TocAnnotationRow::new(entry.clone());
-                self.imp().list_box_annotations.append(&entry_row);
+                let obj = AnnotationObject::new(entry.clone());
+                store.append(&obj);
             }
         }
+
+        // TODO
+        // self.actualizar_estado_vacio();
     }
 
     pub fn populate_chapters(&self, entries: &[BookmarkEntry]) {
@@ -453,75 +521,186 @@ impl TocPanel {
         }
     }
 
-    fn get_current_list_box(&self) -> &ListBox {
-        match self.imp().mode.get() {
-            TocMode::Chapters => &self.imp().list_box_chapters,
-            TocMode::Annotations => &self.imp().list_box_annotations,
-        }
-    }
-
     pub fn select_first(&self) {
-        let list_box = self.get_current_list_box();
-
-        if let Some(first_child) = list_box.first_child() {
-            if let Some(list_row) = first_child.downcast_ref::<ListBoxRow>() {
-                list_box.select_row(Some(list_row));
-                list_row.grab_focus();
+        let mode = self.toc_mode();
+        let imp = self.imp();
+        return match mode {
+            TocMode::Annotations => {
+                assert!(imp.list_view_annotations.is_visible());
+                if let Some(selection_model) = imp
+                    .list_view_annotations
+                    .model()
+                    .and_downcast::<gtk::SingleSelection>()
+                {
+                    selection_model.set_selected(0);
+                    imp.list_view_annotations.grab_focus();
+                }
             }
-        }
+            TocMode::Chapters => {
+                assert!(imp.list_box_chapters.is_visible());
+                if let Some(first_child) = imp.list_box_chapters.first_child() {
+                    if let Some(list_row) = first_child.downcast_ref::<ListBoxRow>() {
+                        imp.list_box_chapters.select_row(Some(list_row));
+                        imp.list_box_chapters.grab_focus();
+                    }
+                }
+            }
+        };
     }
 
     pub fn select_next(&self) -> bool {
-        let list_box = self.get_current_list_box();
+        let mode = self.toc_mode();
+        let imp = self.imp();
+        return match mode {
+            TocMode::Annotations => {
+                assert!(imp.list_view_annotations.is_visible());
+                self.select_next_annotation()
+            }
+            TocMode::Chapters => {
+                assert!(imp.list_box_chapters.is_visible());
+                self.select_next_chapter()
+            }
+        };
+    }
 
-        if let Some(current) = list_box.selected_row() {
-            if let Some(next_widget) = current.next_sibling() {
-                if let Some(next) = next_widget.downcast_ref::<ListBoxRow>() {
-                    list_box.select_row(Some(next));
-                    next.grab_focus();
-                    return true;
-                }
+    fn select_next_annotation(&self) -> bool {
+        let imp = self.imp();
+        if let Some(selection_model) = imp
+            .list_view_annotations
+            .model()
+            .and_downcast::<gtk::SingleSelection>()
+        {
+            let current_pos = selection_model.selected();
+            let n_items = selection_model.model().unwrap().n_items();
+            if current_pos < n_items - 1 {
+                println!("seleccionando posicion {current_pos}+1");
+                selection_model.select_item(current_pos + 1, true);
+                selection_model.set_selected(current_pos + 1);
+                imp.list_view_annotations.scroll_to(
+                    current_pos + 1,
+                    gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS,
+                    None,
+                );
+                imp.list_view_annotations.grab_focus();
+                return true;
+            }
+        }
+        false
+    }
+
+    fn select_prev_annotation(&self) -> bool {
+        let imp = self.imp();
+        if let Some(selection_model) = imp
+            .list_view_annotations
+            .model()
+            .and_downcast::<gtk::SingleSelection>()
+        {
+            let current_pos = selection_model.selected();
+
+            if current_pos != gtk::INVALID_LIST_POSITION && current_pos > 0 {
+                let prev_pos = current_pos - 1;
+                selection_model.set_selected(prev_pos);
+                selection_model.select_item(prev_pos, true);
+                imp.list_view_annotations.scroll_to(
+                    prev_pos,
+                    gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS,
+                    None,
+                );
+                imp.list_view_annotations.grab_focus();
+                return true;
+            }
+        }
+        false
+    }
+
+    fn select_next_chapter(&self) -> bool {
+        let imp = self.imp();
+        if let Some(current) = imp.list_box_chapters.selected_row() {
+            if let Some(prev) = current.next_sibling().and_downcast_ref::<gtk::ListBoxRow>() {
+                imp.list_box_chapters.select_row(Some(prev));
+                prev.grab_focus();
+                return true;
+            }
+        }
+        false
+    }
+
+    fn select_prev_chapter(&self) -> bool {
+        let imp = self.imp();
+        if let Some(current) = imp.list_box_chapters.selected_row() {
+            if let Some(prev) = current.prev_sibling().and_downcast_ref::<gtk::ListBoxRow>() {
+                imp.list_box_chapters.select_row(Some(prev));
+                prev.grab_focus();
+                return true;
             }
         }
         false
     }
 
     pub fn select_prev(&self) -> bool {
-        let list_box = self.get_current_list_box();
-
-        if let Some(current) = list_box.selected_row() {
-            if let Some(prev_widget) = current.prev_sibling() {
-                if let Some(prev) = prev_widget.downcast_ref::<ListBoxRow>() {
-                    list_box.select_row(Some(prev));
-                    prev.grab_focus();
-                    return true;
-                }
+        let mode = self.toc_mode();
+        let imp = self.imp();
+        return match mode {
+            TocMode::Annotations => {
+                assert!(imp.list_view_annotations.is_visible());
+                self.select_prev_annotation()
             }
-        }
-        false
+            TocMode::Chapters => {
+                assert!(imp.list_box_chapters.is_visible());
+                self.select_prev_chapter()
+            }
+        };
     }
 
     pub fn navigate_and_close(&self) {
-        let list_box = self.get_current_list_box();
+        let mode = self.toc_mode();
+        let imp = self.imp();
+        match mode {
+            TocMode::Chapters => {
+                assert!(imp.list_view_annotations.is_visible());
 
-        if let Some(row) = list_box.selected_row() {
-            if let Some(entry_row) = row.downcast_ref::<TocChapterRow>() {
-                let null: Option<WordCursor> = None;
-                self.emit_by_name::<()>(
-                    "toc-entry-selected",
-                    &[&(entry_row.page_index() as u32), &null],
-                );
-                self.set_visible(false);
+                if let Some(row) = imp.list_box_chapters.selected_row() {
+                    if let Some(entry_row) = row.downcast_ref::<TocChapterRow>() {
+                        let null: Option<WordCursor> = None;
+                        self.emit_by_name::<()>(
+                            "toc-entry-selected",
+                            &[&(entry_row.page_index() as u32), &null],
+                        );
+                        self.set_visible(false);
+                        return;
+                    }
+                }
             }
-            if let Some(entry_row) = row.downcast_ref::<TocAnnotationRow>() {
-                let cursor = Some(entry_row.imp().annotation.borrow().get_start_word_cursor());
-                self.emit_by_name::<()>(
-                    "toc-entry-selected",
-                    &[&(entry_row.page_index() as u32), &cursor],
-                );
-                self.set_visible(false);
+            TocMode::Annotations => {
+                assert!(imp.list_box_chapters.is_visible());
+
+                if let Some(selection_model) = imp
+                    .list_view_annotations
+                    .model()
+                    .and_downcast::<gtk::SingleSelection>()
+                {
+                    let position = selection_model.selected();
+
+                    if position != gtk::INVALID_LIST_POSITION {
+                        if let Some(obj) = selection_model
+                            .item(position)
+                            .and_downcast::<AnnotationObject>()
+                        {
+                            let ann = obj.annotation();
+                            let cursor = Some(ann.get_start_word_cursor());
+
+                            println!("{:#?}", ann);
+                            println!("{:#?}", cursor);
+                            self.emit_by_name::<()>(
+                                "toc-entry-selected",
+                                &[&(ann.start_page as u32), &cursor],
+                            );
+                            self.set_visible(false);
+                        }
+                    }
+                }
             }
-        }
+        };
     }
 
     pub fn clear(&self) {
@@ -529,17 +708,7 @@ impl TocPanel {
         while let Some(row) = imp.list_box_chapters.first_child() {
             imp.list_box_chapters.remove(&row);
         }
-        while let Some(row) = imp.list_box_annotations.first_child() {
-            imp.list_box_annotations.remove(&row);
-        }
-    }
-
-    fn clear_current_listbox(&self) {
-        let list_box = self.get_current_list_box();
-
-        while let Some(row) = list_box.first_child() {
-            list_box.remove(&row);
-        }
+        self.get_store().remove_all();
     }
 }
 

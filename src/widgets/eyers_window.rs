@@ -337,7 +337,7 @@ impl EyersWindow {
 
     fn setup_keyboard_controller(&self) {
         let controller = gtk::EventControllerKey::new();
-        controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+        // controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         let window_weak = self.downgrade();
 
         controller.connect_key_pressed(move |_, key, _, modifiers| {

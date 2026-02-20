@@ -40,6 +40,10 @@ pub enum KeyAction {
     // === TOC Navigation ===
     ScrollTOC(ScrollDir),
     SelectTocRow,
+    ScrollTocToStart,
+    ScrollTocToEnd,
+    EditTocAnnotation,
+    DeleteTocAnnotation,
 
     // === Mode Changes ===
     EnterVisual,

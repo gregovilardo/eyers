@@ -2,7 +2,8 @@ use gtk::gdk::{self, ModifierType};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::modes::app_mode::{AppMode, WordCursor};
-use crate::text_map::{NavDirection, TextMapCache, navigate};
+use crate::text_map::{navigate, NavDirection, TextMapCache};
+use crate::widgets::TocMode;
 
 use super::handler::KeyHandler;
 use super::input_state::InputState;
@@ -45,8 +46,23 @@ impl KeyResult {
 pub fn handle_toc_key(
     handler: &KeyHandler,
     keyval: gdk::Key,
-    modifiers: ModifierType,
+    _modifiers: ModifierType,
+    toc_mode: TocMode,
 ) -> KeyResult {
+    // Handle PendingG state for gg
+    if matches!(handler.input_state(), InputState::PendingG) {
+        return match keyval {
+            gdk::Key::g => {
+                handler.reset();
+                KeyResult::Action(KeyAction::ScrollTocToStart)
+            }
+            _ => {
+                handler.reset();
+                KeyResult::Action(KeyAction::None)
+            }
+        };
+    }
+
     // Handle number accumulation
     if let Some(digit) = get_number_from_key(keyval) {
         handler.accumulate_digit(digit);
@@ -64,6 +80,22 @@ pub fn handle_toc_key(
         gdk::Key::k | gdk::Key::Up => KeyResult::Action(KeyAction::ScrollTOC(ScrollDir::Up)),
         gdk::Key::Tab => KeyResult::Action(KeyAction::ToggleTOC),
         gdk::Key::Return => KeyResult::Action(KeyAction::SelectTocRow),
+        gdk::Key::g => {
+            handler.set_input_state(InputState::PendingG);
+            KeyResult::StateChanged
+        }
+        gdk::Key::G => {
+            handler.reset();
+            KeyResult::Action(KeyAction::ScrollTocToEnd)
+        }
+        gdk::Key::a if matches!(toc_mode, TocMode::Annotations) => {
+            handler.reset();
+            KeyResult::Action(KeyAction::EditTocAnnotation)
+        }
+        gdk::Key::d if matches!(toc_mode, TocMode::Annotations) => {
+            handler.reset();
+            KeyResult::Action(KeyAction::DeleteTocAnnotation)
+        }
         _ => KeyResult::Unhandled,
     }
 }

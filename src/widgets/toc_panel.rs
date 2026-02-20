@@ -50,6 +50,10 @@ mod imp {
         pub title: Label,
         pub subtitle: Label,
         pub page_index: Label,
+        pub edit_button: Button,
+        pub delete_button: Button,
+        pub button_box: Box,
+        pub annotation_id: Cell<i64>,
     }
 
     #[glib::object_subclass]
@@ -93,6 +97,12 @@ mod imp {
                 vec![
                     Signal::builder("toc-entry-selected")
                         .param_types([u32::static_type(), WordCursor::static_type()])
+                        .build(),
+                    Signal::builder("annotation-edit-requested")
+                        .param_types([i64::static_type()])
+                        .build(),
+                    Signal::builder("annotation-delete-requested")
+                        .param_types([i64::static_type()])
                         .build(),
                 ]
             })
@@ -197,6 +207,26 @@ impl TocAnnotationRow {
         imp.page_index.set_hexpand(false);
         imp.page_index.add_css_class("toc-page-index");
         self.append(&imp.page_index);
+
+        // Setup button box
+        imp.button_box.set_orientation(gtk::Orientation::Vertical);
+        imp.button_box.set_spacing(4);
+        imp.button_box.set_hexpand(false);
+        imp.button_box.set_valign(gtk::Align::Center);
+
+        // Setup edit button
+        imp.edit_button.set_icon_name("document-edit-symbolic");
+        imp.edit_button.add_css_class("flat");
+        imp.edit_button.set_can_shrink(true);
+        imp.button_box.append(&imp.edit_button);
+
+        // Setup delete button
+        imp.delete_button.set_icon_name("edit-delete-symbolic");
+        imp.delete_button.add_css_class("flat");
+        imp.delete_button.set_can_shrink(true);
+        imp.button_box.append(&imp.delete_button);
+
+        self.append(&imp.button_box);
     }
 
     pub fn bind_data(&self, obj: &AnnotationObject) {
@@ -206,6 +236,19 @@ impl TocAnnotationRow {
         imp.title.set_text(&data.selected_text);
         imp.subtitle.set_text(&data.note);
         imp.page_index.set_text(&data.start_page.to_string());
+        imp.annotation_id.set(data.id);
+    }
+
+    pub fn annotation_id(&self) -> i64 {
+        self.imp().annotation_id.get()
+    }
+
+    pub fn edit_button(&self) -> &Button {
+        &self.imp().edit_button
+    }
+
+    pub fn delete_button(&self) -> &Button {
+        &self.imp().delete_button
     }
 }
 
@@ -318,6 +361,8 @@ impl TocPanel {
 
     fn create_and_bind_factory(&self) -> gtk::SignalListItemFactory {
         let factory = gtk::SignalListItemFactory::new();
+        let panel_weak = self.downgrade();
+
         factory.connect_setup(move |_, list_item| {
             let list_item = list_item
                 .downcast_ref::<gtk::ListItem>()
@@ -340,6 +385,25 @@ impl TocPanel {
                 .unwrap();
 
             row_widget.bind_data(&data_obj);
+
+            // Connect buttons
+            let annotation_id = data_obj.annotation().id;
+
+            // Edit button
+            let panel_weak_clone = panel_weak.clone();
+            row_widget.edit_button().connect_clicked(move |_| {
+                if let Some(panel) = panel_weak_clone.upgrade() {
+                    panel.emit_by_name::<()>("annotation-edit-requested", &[&annotation_id]);
+                }
+            });
+
+            // Delete button
+            let panel_weak_clone = panel_weak.clone();
+            row_widget.delete_button().connect_clicked(move |_| {
+                if let Some(panel) = panel_weak_clone.upgrade() {
+                    panel.emit_by_name::<()>("annotation-delete-requested", &[&annotation_id]);
+                }
+            });
         });
         factory
     }
@@ -548,6 +612,42 @@ impl TocPanel {
         };
     }
 
+    pub fn select_last(&self) {
+        let mode = self.toc_mode();
+        let imp = self.imp();
+
+        match mode {
+            TocMode::Annotations => {
+                assert!(imp.list_view_annotations.is_visible());
+                if let Some(selection_model) = imp
+                    .list_view_annotations
+                    .model()
+                    .and_downcast::<gtk::SingleSelection>()
+                {
+                    let n_items = selection_model.model().unwrap().n_items();
+                    if n_items > 0 {
+                        selection_model.set_selected(n_items - 1);
+                        imp.list_view_annotations.scroll_to(
+                            n_items - 1,
+                            gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS,
+                            None,
+                        );
+                        imp.list_view_annotations.grab_focus();
+                    }
+                }
+            }
+            TocMode::Chapters => {
+                assert!(imp.list_box_chapters.is_visible());
+                if let Some(last_child) = imp.list_box_chapters.last_child() {
+                    if let Some(list_row) = last_child.downcast_ref::<ListBoxRow>() {
+                        imp.list_box_chapters.select_row(Some(list_row));
+                        imp.list_box_chapters.grab_focus();
+                    }
+                }
+            }
+        }
+    }
+
     pub fn select_next(&self) -> bool {
         let mode = self.toc_mode();
         let imp = self.imp();
@@ -701,6 +801,30 @@ impl TocPanel {
                 }
             }
         };
+    }
+
+    pub fn get_selected_annotation_id(&self) -> Option<i64> {
+        let imp = self.imp();
+
+        if !matches!(self.toc_mode(), TocMode::Annotations) {
+            return None;
+        }
+
+        let selection_model = imp
+            .list_view_annotations
+            .model()
+            .and_downcast::<gtk::SingleSelection>()?;
+
+        let position = selection_model.selected();
+        if position == gtk::INVALID_LIST_POSITION {
+            return None;
+        }
+
+        let obj = selection_model
+            .item(position)
+            .and_downcast::<AnnotationObject>()?;
+
+        Some(obj.annotation().id)
     }
 
     pub fn clear(&self) {

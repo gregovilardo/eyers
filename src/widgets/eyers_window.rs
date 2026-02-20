@@ -10,15 +10,15 @@ use std::fs;
 use std::path::Path;
 
 use crate::modes::{
-    AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
-    handle_post_global_key, handle_pre_global_key, handle_toc_key, handle_visual_mode_key,
+    handle_normal_mode_key, handle_post_global_key, handle_pre_global_key, handle_toc_key,
+    handle_visual_mode_key, AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor,
 };
 use crate::services::annotations::find_next_annotation_at_position;
 use crate::services::annotations::find_prev_annotation_at_position;
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
+use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
 use crate::widgets::toc_panel::TocMode;
 use crate::widgets::{
     AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, StatusBar, TocPanel,
@@ -333,6 +333,30 @@ impl EyersWindow {
                 }
             ),
         );
+
+        // Connect annotation-edit-requested signal
+        let window_weak = self.downgrade();
+        imp.toc_panel.connect_closure(
+            "annotation-edit-requested",
+            false,
+            glib::closure_local!(move |_panel: &TocPanel, annotation_id: i64| {
+                if let Some(window) = window_weak.upgrade() {
+                    window.edit_annotation_from_toc(annotation_id);
+                }
+            }),
+        );
+
+        // Connect annotation-delete-requested signal
+        let window_weak = self.downgrade();
+        imp.toc_panel.connect_closure(
+            "annotation-delete-requested",
+            false,
+            glib::closure_local!(move |_panel: &TocPanel, annotation_id: i64| {
+                if let Some(window) = window_weak.upgrade() {
+                    window.show_delete_annotation_dialog(annotation_id);
+                }
+            }),
+        );
     }
 
     fn setup_keyboard_controller(&self) {
@@ -345,7 +369,8 @@ impl EyersWindow {
                 let imp = window.imp();
                 let is_toc_visible = imp.toc_panel.is_visible();
                 if is_toc_visible {
-                    match handle_toc_key(&imp.key_handler, key, modifiers) {
+                    match handle_toc_key(&imp.key_handler, key, modifiers, imp.toc_panel.toc_mode())
+                    {
                         KeyResult::Action(action) => {
                             if window.execute_key_action(action) {
                                 return glib::Propagation::Stop;
@@ -478,6 +503,30 @@ impl EyersWindow {
                     if !result {
                         break;
                     }
+                }
+                true
+            }
+
+            KeyAction::ScrollTocToStart => {
+                self.toc_panel().select_first();
+                true
+            }
+
+            KeyAction::ScrollTocToEnd => {
+                self.toc_panel().select_last();
+                true
+            }
+
+            KeyAction::EditTocAnnotation => {
+                if let Some(ann_id) = self.toc_panel().get_selected_annotation_id() {
+                    self.edit_annotation_from_toc(ann_id);
+                }
+                true
+            }
+
+            KeyAction::DeleteTocAnnotation => {
+                if let Some(ann_id) = self.toc_panel().get_selected_annotation_id() {
+                    self.show_delete_annotation_dialog(ann_id);
                 }
                 true
             }
@@ -2169,6 +2218,63 @@ impl EyersWindow {
                 eprintln!("Failed to delete annotation: {}", e);
             }
         }
+    }
+
+    fn edit_annotation_from_toc(&self, annotation_id: i64) {
+        let imp = self.imp();
+
+        // Get the annotation from the database
+        let annotation = match annotations::get_annotation(annotation_id) {
+            Ok(ann) => ann,
+            Err(e) => {
+                eprintln!("Error loading annotation: {}", e);
+                return;
+            }
+        };
+
+        // Create cursors from the annotation
+        let start = WordCursor::new(annotation.start_page, annotation.start_word);
+        let end = WordCursor::new(annotation.end_page, annotation.end_word);
+
+        // Configure the pending_annotation
+        imp.pending_annotation.replace(Some((start, end)));
+
+        // Configure the annotation panel
+        imp.annotation_panel
+            .set_selected_text(&annotation.selected_text);
+        imp.annotation_panel.set_annotation_id(Some(annotation.id));
+        imp.annotation_panel.set_note(&annotation.note);
+
+        // Close TOC
+        imp.toc_panel.set_visible(false);
+
+        // Show annotation panel and focus
+        imp.annotation_panel.set_visible(true);
+        imp.annotation_panel.focus_input();
+    }
+
+    fn show_delete_annotation_dialog(&self, annotation_id: i64) {
+        let dialog = gtk::AlertDialog::builder()
+            .message("Delete Annotation")
+            .detail(
+                "Are you sure you want to delete this annotation? This action cannot be undone.",
+            )
+            .buttons(vec!["Cancel".to_string(), "Delete".to_string()])
+            .cancel_button(0)
+            .default_button(0)
+            .build();
+
+        let window_weak = self.downgrade();
+        dialog.choose(Some(self), None::<&gio::Cancellable>, move |response| {
+            if let Ok(button_index) = response {
+                if button_index == 1 {
+                    // "Delete" button
+                    if let Some(window) = window_weak.upgrade() {
+                        window.delete_annotation(annotation_id);
+                    }
+                }
+            }
+        });
     }
 
     fn close_annotation_panel(&self) {

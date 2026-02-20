@@ -17,5 +17,5 @@ pub use highlight_overlay::{HighlightOverlay, HighlightRect};
 pub use pdf_view::PdfView;
 pub use settings_window::SettingsWindow;
 pub use status_bar::StatusBar;
-pub use toc_panel::TocPanel;
+pub use toc_panel::{TocMode, TocPanel};
 pub use translation_panel::TranslationPanel;

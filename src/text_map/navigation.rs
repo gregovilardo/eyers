@@ -16,6 +16,7 @@ pub enum NavDirection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NavResult {
     pub page_index: usize,
+    pub line_index: usize,
     pub word_index: usize,
 }
 
@@ -41,10 +42,17 @@ pub fn navigate(
     };
 
     match direction {
-        NavDirection::Left => navigate_left(cache, document, current_page, current_word),
-        NavDirection::Right => {
-            navigate_right(cache, document, current_page, current_word, word_count)
+        NavDirection::Left => {
+            navigate_left(cache, document, current_page, current_line, current_word)
         }
+        NavDirection::Right => navigate_right(
+            cache,
+            document,
+            current_page,
+            current_line,
+            current_word,
+            word_count,
+        ),
         NavDirection::Up => navigate_up(cache, document, current_page, current_line, current_x),
         NavDirection::Down => navigate_down(
             cache,
@@ -62,12 +70,16 @@ fn navigate_left(
     cache: &mut TextMapCache,
     document: &PdfDocument,
     current_page: usize,
+    _current_line: usize,
     current_word: usize,
 ) -> Option<NavResult> {
     if current_word > 0 {
+        let current_map = cache.get_or_build(current_page, document)?;
+        let word = current_map.get_word(current_word - 1)?;
         // Previous word on same page
         Some(NavResult {
             page_index: current_page,
+            line_index: word.line_index,
             word_index: current_word - 1,
         })
     } else if current_page > 0 {
@@ -76,6 +88,7 @@ fn navigate_left(
         if prev_map.word_count() > 0 {
             Some(NavResult {
                 page_index: current_page - 1,
+                line_index: prev_map.line_count() - 1,
                 word_index: prev_map.word_count() - 1,
             })
         } else {
@@ -91,13 +104,17 @@ fn navigate_right(
     cache: &mut TextMapCache,
     document: &PdfDocument,
     current_page: usize,
+    _current_line: usize,
     current_word: usize,
     word_count: usize,
 ) -> Option<NavResult> {
     if current_word < word_count.saturating_sub(1) {
+        let current_map = cache.get_or_build(current_page, document)?;
+        let word = current_map.get_word(current_word + 1)?;
         // Next word on same page
         Some(NavResult {
             page_index: current_page,
+            line_index: word.line_index,
             word_index: current_word + 1,
         })
     } else if current_page < cache.page_count() - 1 {
@@ -106,6 +123,7 @@ fn navigate_right(
         if next_map.word_count() > 0 {
             Some(NavResult {
                 page_index: current_page + 1,
+                line_index: 0,
                 word_index: 0,
             })
         } else {
@@ -131,6 +149,7 @@ fn navigate_up(
         let word_idx = find_closest_word_on_line(text_map, target_line, current_x)?;
         Some(NavResult {
             page_index: current_page,
+            line_index: target_line,
             word_index: word_idx,
         })
     } else if current_page > 0 {
@@ -141,6 +160,7 @@ fn navigate_up(
             let word_idx = find_closest_word_on_line(prev_map, target_line, current_x)?;
             Some(NavResult {
                 page_index: current_page - 1,
+                line_index: target_line,
                 word_index: word_idx,
             })
         } else {
@@ -167,6 +187,7 @@ fn navigate_down(
         let word_idx = find_closest_word_on_line(text_map, target_line, current_x)?;
         Some(NavResult {
             page_index: current_page,
+            line_index: target_line,
             word_index: word_idx,
         })
     } else if current_page < cache.page_count() - 1 {
@@ -176,6 +197,7 @@ fn navigate_down(
             let word_idx = find_closest_word_on_line(next_map, 0, current_x)?;
             Some(NavResult {
                 page_index: current_page + 1,
+                line_index: 0,
                 word_index: word_idx,
             })
         } else {
@@ -244,6 +266,7 @@ pub fn find_word_on_line_starting_with(
                     if first_char.to_lowercase().next() == Some(target_lower) {
                         return Some(NavResult {
                             page_index,
+                            line_index,
                             word_index: word_idx,
                         });
                     }
@@ -258,6 +281,7 @@ pub fn find_word_on_line_starting_with(
                     if first_char.to_lowercase().next() == Some(target_lower) {
                         return Some(NavResult {
                             page_index,
+                            line_index,
                             word_index: word_idx,
                         });
                     }

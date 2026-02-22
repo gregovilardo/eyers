@@ -10,15 +10,16 @@ use std::fs;
 use std::path::Path;
 
 use crate::modes::{
-    handle_normal_mode_key, handle_post_global_key, handle_pre_global_key, handle_toc_key,
-    handle_visual_mode_key, AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor,
+    AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
+    handle_post_global_key, handle_pre_global_key, handle_toc_key, handle_visual_mode_key,
 };
 use crate::services::annotations::find_next_annotation_at_position;
 use crate::services::annotations::find_prev_annotation_at_position;
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
+use crate::text_map::NavDirection;
+use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::toc_panel::TocMode;
 use crate::widgets::{
     AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, StatusBar, TocPanel,
@@ -415,6 +416,7 @@ impl EyersWindow {
             if let Some(window) = window_weak.upgrade() {
                 let imp = window.imp();
                 let is_toc_visible = imp.toc_panel.is_visible();
+                println!("is_toc_visible {is_toc_visible}");
                 if is_toc_visible {
                     match handle_toc_key(&imp.key_handler, key, modifiers, imp.toc_panel.toc_mode())
                     {
@@ -663,10 +665,6 @@ impl EyersWindow {
             }
 
             KeyAction::ClearSelection => {
-                {
-                    let mut mode = imp.app_mode.borrow_mut();
-                    mode.clear_selection();
-                }
                 imp.pdf_view.clear_selection();
                 self.update_highlights();
                 true

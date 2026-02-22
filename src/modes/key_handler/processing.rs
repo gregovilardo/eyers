@@ -2,7 +2,7 @@ use gtk::gdk::{self, ModifierType};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::modes::app_mode::{AppMode, WordCursor};
-use crate::text_map::{navigate, NavDirection, TextMapCache};
+use crate::text_map::{NavDirection, TextMapCache, navigate};
 use crate::widgets::TocMode;
 
 use super::handler::KeyHandler;
@@ -69,8 +69,6 @@ pub fn handle_toc_key(
         return KeyResult::StateChanged;
     }
 
-    println!("olis");
-    println!("{:#?}", keyval);
     match keyval {
         gdk::Key::Escape => {
             handler.reset();
@@ -150,6 +148,9 @@ pub fn handle_pre_global_key(
 
     // Handle number accumulation
     if let Some(digit) = get_number_from_key(keyval) {
+        if digit == 0 && handler.pending_count().is_none() {
+            return KeyResult::Unhandled;
+        }
         handler.accumulate_digit(digit);
         return KeyResult::StateChanged;
     }
@@ -158,7 +159,7 @@ pub fn handle_pre_global_key(
     match keyval {
         gdk::Key::Escape => {
             handler.reset();
-            KeyResult::Action(KeyAction::None)
+            KeyResult::Unhandled
         }
         gdk::Key::Tab => KeyResult::Action(KeyAction::ToggleTOC),
         gdk::Key::g => {
@@ -174,12 +175,6 @@ pub fn handle_pre_global_key(
                 None => KeyResult::Action(KeyAction::ScrollToEnd),
             }
         }
-        //TODO: PendingNext para usar con annotations no sigue mucho la filosofia de vim ...
-        //USAR [a  ]a jeje
-        // gdk::Key::n => {
-        //     handler.set_input_state(InputState::PendingNext);
-        //     KeyResult::StateChanged
-        // }
         _ => KeyResult::Unhandled,
     }
 }
@@ -331,6 +326,27 @@ pub fn handle_visual_mode_key(
             }
         }
 
+        // TODO: Here Start and End don't work, they are captured before, for
+        // now i would let it like this because for me is not a problem
+        gdk::Key::_0 | gdk::Key::Start => {
+            if let Some(new_cursor) =
+                navigate_line_edge(cache, document, cursor, NavDirection::Left)
+            {
+                KeyResult::Action(KeyAction::CursorMoved { cursor: new_cursor })
+            } else {
+                KeyResult::Action(KeyAction::None)
+            }
+        }
+        gdk::Key::dollar | gdk::Key::End => {
+            if let Some(new_cursor) =
+                navigate_line_edge(cache, document, cursor, NavDirection::Right)
+            {
+                KeyResult::Action(KeyAction::CursorMoved { cursor: new_cursor })
+            } else {
+                KeyResult::Action(KeyAction::None)
+            }
+        }
+
         gdk::Key::v => KeyResult::Action(KeyAction::ExitVisual),
 
         gdk::Key::Escape => {
@@ -418,6 +434,41 @@ fn navigate_with_count(
             current.word_index,
             direction,
         ) {
+            current = WordCursor::new(result.page_index, result.word_index);
+        } else {
+            // Stop if navigation fails
+            break;
+        }
+    }
+
+    // Only return if we actually moved
+    if current != start_cursor {
+        Some(current)
+    } else {
+        None
+    }
+}
+
+fn navigate_line_edge(
+    cache: &mut TextMapCache,
+    document: &PdfDocument,
+    start_cursor: WordCursor,
+    direction: NavDirection,
+) -> Option<WordCursor> {
+    let mut current = start_cursor;
+    let mut cursor_line: Option<usize> = None;
+    loop {
+        if let Some(result) = navigate(
+            cache,
+            document,
+            current.page_index,
+            current.word_index,
+            direction,
+        ) {
+            let _ = cursor_line.get_or_insert(result.line_index);
+            if result.line_index != cursor_line.expect("value should exist") {
+                break;
+            }
             current = WordCursor::new(result.page_index, result.word_index);
         } else {
             // Stop if navigation fails

@@ -797,11 +797,32 @@ impl EyersWindow {
         };
 
         self.scroll_by_percent(0.0, y_percent);
-
-        // In Visual mode, update cursor to word at ~20% from viewport top
-        // This feels more natural than the very first word at the top edge
-        if let Some(cursor) = self.compute_word_at_viewport_offset(DEFAULT_VIEWPORT_OFFSET) {
-            self.move_cursor(cursor);
+        match direction {
+            ScrollDir::Up => {
+                // In Visual mode, update cursor to word at ~20% from viewport top
+                // This feels more natural than the very first word at the top edge
+                if let Some(cursor) = self.compute_word_at_viewport_offset(DEFAULT_VIEWPORT_OFFSET)
+                {
+                    self.move_cursor(cursor);
+                }
+            }
+            // If the text is really up on the page then it cannot find the cursor
+            // below so it stays on the same page... its still buggy but is a workaround
+            // TODO: fix it
+            ScrollDir::Down => {
+                if let Some(cursor) = self.compute_word_at_viewport_offset(DEFAULT_VIEWPORT_OFFSET)
+                {
+                    let mut new_cursor: Option<WordCursor> = Some(cursor);
+                    if let Some(current_cursor) = self.imp().app_mode.borrow().cursor() {
+                        if current_cursor == cursor {
+                            new_cursor = self.compute_first_word_of_page(
+                                (self.pdf_view().current_page() + 1) as usize,
+                            );
+                        }
+                    }
+                    self.move_cursor(new_cursor.expect("new_cursor"));
+                }
+            }
         }
     }
 
@@ -989,13 +1010,13 @@ impl EyersWindow {
         let cache = cache.as_mut()?;
 
         let page_pictures = imp.pdf_view.page_pictures();
-        let spacing = 10.0;
+        const SPACING: f64 = 10.0;
 
         for (page_index, picture) in page_pictures.iter().enumerate() {
             let nat_size = picture.preferred_size().1;
             let picture_height = nat_size.height() as f64;
 
-            let page_top = page_index as f64 * (picture_height + spacing);
+            let page_top = page_index as f64 * (picture_height + SPACING);
             let page_bottom = page_top + picture_height;
 
             // Check if the target Y falls within this page
@@ -1040,7 +1061,6 @@ impl EyersWindow {
                 }
             }
         }
-
         // If target falls outside all pages (e.g., in spacing), find nearest page
         // and return first visible word
         self.compute_first_visible_word()

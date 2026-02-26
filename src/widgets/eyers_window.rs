@@ -144,11 +144,13 @@ impl EyersWindow {
     }
 
     fn init_pdfium(&self) {
-        let bindings = Pdfium::bind_to_library(Path::new("/usr/bin/libpdfium.so"))
-            .expect("Failed to bind to PDFium");
+        // you can let the bindings and put the path if you have it installed
+        // let bindings = Pdfium::bind_to_library(Path::new("/usr/bin/libpdfium.so"))
+        //     .expect("Failed to bind to PDFium");
 
-        let pdfium: &'static Pdfium =
-            std::boxed::Box::leak(std::boxed::Box::new(Pdfium::new(bindings)));
+        let pdfium = pdfium_auto::bind_bundled().expect("Pdfium auto failed");
+        let pdfium: &'static Pdfium = std::boxed::Box::leak(std::boxed::Box::new(pdfium));
+        // std::boxed::Box::leak(std::boxed::Box::new(Pdfium::new(bindings)));
 
         self.imp().pdfium.replace(Some(pdfium));
         self.imp().pdf_view.set_pdfium(pdfium);

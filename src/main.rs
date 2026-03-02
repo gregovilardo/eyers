@@ -24,8 +24,7 @@ fn load_css() {
 fn main() -> glib::ExitCode {
     let app = Application::builder()
         .application_id(APP_ID)
-        .flags(gio::ApplicationFlags::HANDLES_OPEN)
-        .flags(gio::ApplicationFlags::NON_UNIQUE)
+        .flags(gio::ApplicationFlags::HANDLES_OPEN | gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     app.connect_startup(|_| load_css());
@@ -39,6 +38,7 @@ fn main() -> glib::ExitCode {
     // Handle opening files from command line
     app.connect_open(|app, files, _| {
         let window = EyersWindow::new(app);
+        println!("GHO");
 
         if let Some(file) = files.first() {
             if let Some(path) = file.path() {

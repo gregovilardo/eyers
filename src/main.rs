@@ -25,6 +25,7 @@ fn main() -> glib::ExitCode {
     let app = Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
+        .flags(gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     app.connect_startup(|_| load_css());

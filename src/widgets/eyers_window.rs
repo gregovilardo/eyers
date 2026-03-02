@@ -984,6 +984,9 @@ impl EyersWindow {
                 // Update highlights if in visual mode
                 if window.imp().app_mode.borrow().is_visual() {
                     window.update_highlights();
+                } else {
+                    // Always update annotations even when not in visual mode
+                    window.update_annotation_highlights();
                 }
             }
         });
@@ -1180,111 +1183,69 @@ impl EyersWindow {
         let cursor = imp.pdf_view.cursor();
         let selection = imp.pdf_view.selection();
 
-        let cache = imp.text_cache.borrow();
-        let cache = match cache.as_ref() {
-            Some(c) => c,
-            None => return,
-        };
+        // Scope the cache borrow so it's dropped before calling update_annotation_highlights
+        {
+            let cache = imp.text_cache.borrow();
+            let cache = match cache.as_ref() {
+                Some(c) => c,
+                None => return,
+            };
 
-        // Get page pictures for calculating offsets
-        let page_pictures = imp.pdf_view.page_pictures();
+            // Get page pictures for calculating offsets
+            let page_pictures = imp.pdf_view.page_pictures();
 
-        // Get effective render width based on zoom level
-        let render_width =
-            crate::services::pdf_text::get_render_width_for_zoom(imp.pdf_view.zoom_level());
+            // Get effective render width based on zoom level
+            let render_width =
+                crate::services::pdf_text::get_render_width_for_zoom(imp.pdf_view.zoom_level());
 
-        // Helper closure to get x_offset for a page
-        let get_x_offset = |page_index: usize| -> f64 {
-            page_pictures
-                .get(page_index)
-                .map(|pic| calculate_picture_offset(pic))
-                .unwrap_or(0.0)
-        };
+            // Helper closure to get x_offset for a page
+            let get_x_offset = |page_index: usize| -> f64 {
+                page_pictures
+                    .get(page_index)
+                    .map(|pic| calculate_picture_offset(pic))
+                    .unwrap_or(0.0)
+            };
 
-        // Build a map of page_index -> (cursor_rect, selection_rects)
-        let mut page_highlights: std::collections::HashMap<
-            usize,
-            (Option<HighlightRect>, Vec<HighlightRect>),
-        > = std::collections::HashMap::new();
+            // Build a map of page_index -> (cursor_rect, selection_rects)
+            let mut page_highlights: std::collections::HashMap<
+                usize,
+                (Option<HighlightRect>, Vec<HighlightRect>),
+            > = std::collections::HashMap::new();
 
-        // Add cursor highlight
-        if let Some(cursor) = cursor {
-            if let Some(text_map) = cache.get(cursor.page_index) {
-                if let Some(word) = text_map.get_word(cursor.word_index) {
-                    let x_offset = get_x_offset(cursor.page_index);
-                    let rect = HighlightRect::from_pdf_bounds(
-                        &word.bounds,
-                        text_map.page_width,
-                        text_map.page_height,
-                        x_offset,
-                        render_width,
-                    );
-                    page_highlights
-                        .entry(cursor.page_index)
-                        .or_insert((None, Vec::new()))
-                        .0 = Some(rect);
+            // Add cursor highlight
+            if let Some(cursor) = cursor {
+                if let Some(text_map) = cache.get(cursor.page_index) {
+                    if let Some(word) = text_map.get_word(cursor.word_index) {
+                        let x_offset = get_x_offset(cursor.page_index);
+                        let rect = HighlightRect::from_pdf_bounds(
+                            &word.bounds,
+                            text_map.page_width,
+                            text_map.page_height,
+                            x_offset,
+                            render_width,
+                        );
+                        page_highlights
+                            .entry(cursor.page_index)
+                            .or_insert((None, Vec::new()))
+                            .0 = Some(rect);
+                    }
                 }
             }
-        }
 
-        // Add selection highlights
-        if let Some((start, end)) = selection {
-            let (first, last) =
-                if (start.page_index, start.word_index) <= (end.page_index, end.word_index) {
-                    (start, end)
-                } else {
-                    (end, start)
-                };
+            // Add selection highlights
+            if let Some((start, end)) = selection {
+                let (first, last) =
+                    if (start.page_index, start.word_index) <= (end.page_index, end.word_index) {
+                        (start, end)
+                    } else {
+                        (end, start)
+                    };
 
-            if first.page_index == last.page_index {
-                // Same page selection
-                if let Some(text_map) = cache.get(first.page_index) {
-                    let x_offset = get_x_offset(first.page_index);
-                    for idx in first.word_index..=last.word_index {
-                        if let Some(word) = text_map.get_word(idx) {
-                            let rect = HighlightRect::from_pdf_bounds(
-                                &word.bounds,
-                                text_map.page_width,
-                                text_map.page_height,
-                                x_offset,
-                                render_width,
-                            );
-                            page_highlights
-                                .entry(first.page_index)
-                                .or_insert((None, Vec::new()))
-                                .1
-                                .push(rect);
-                        }
-                    }
-                }
-            } else {
-                // Cross-page selection
-                // First page: from first.word_index to end
-                if let Some(text_map) = cache.get(first.page_index) {
-                    let x_offset = get_x_offset(first.page_index);
-                    for idx in first.word_index..text_map.word_count() {
-                        if let Some(word) = text_map.get_word(idx) {
-                            let rect = HighlightRect::from_pdf_bounds(
-                                &word.bounds,
-                                text_map.page_width,
-                                text_map.page_height,
-                                x_offset,
-                                render_width,
-                            );
-                            page_highlights
-                                .entry(first.page_index)
-                                .or_insert((None, Vec::new()))
-                                .1
-                                .push(rect);
-                        }
-                    }
-                }
-
-                // Middle pages
-                for page_idx in (first.page_index + 1)..last.page_index {
-                    if let Some(text_map) = cache.get(page_idx) {
-                        let x_offset = get_x_offset(page_idx);
-                        for idx in 0..text_map.word_count() {
+                if first.page_index == last.page_index {
+                    // Same page selection
+                    if let Some(text_map) = cache.get(first.page_index) {
+                        let x_offset = get_x_offset(first.page_index);
+                        for idx in first.word_index..=last.word_index {
                             if let Some(word) = text_map.get_word(idx) {
                                 let rect = HighlightRect::from_pdf_bounds(
                                     &word.bounds,
@@ -1294,7 +1255,73 @@ impl EyersWindow {
                                     render_width,
                                 );
                                 page_highlights
-                                    .entry(page_idx)
+                                    .entry(first.page_index)
+                                    .or_insert((None, Vec::new()))
+                                    .1
+                                    .push(rect);
+                            }
+                        }
+                    }
+                } else {
+                    // Cross-page selection
+                    // First page: from first.word_index to end
+                    if let Some(text_map) = cache.get(first.page_index) {
+                        let x_offset = get_x_offset(first.page_index);
+                        for idx in first.word_index..text_map.word_count() {
+                            if let Some(word) = text_map.get_word(idx) {
+                                let rect = HighlightRect::from_pdf_bounds(
+                                    &word.bounds,
+                                    text_map.page_width,
+                                    text_map.page_height,
+                                    x_offset,
+                                    render_width,
+                                );
+                                page_highlights
+                                    .entry(first.page_index)
+                                    .or_insert((None, Vec::new()))
+                                    .1
+                                    .push(rect);
+                            }
+                        }
+                    }
+
+                    // Middle pages
+                    for page_idx in (first.page_index + 1)..last.page_index {
+                        if let Some(text_map) = cache.get(page_idx) {
+                            let x_offset = get_x_offset(page_idx);
+                            for idx in 0..text_map.word_count() {
+                                if let Some(word) = text_map.get_word(idx) {
+                                    let rect = HighlightRect::from_pdf_bounds(
+                                        &word.bounds,
+                                        text_map.page_width,
+                                        text_map.page_height,
+                                        x_offset,
+                                        render_width,
+                                    );
+                                    page_highlights
+                                        .entry(page_idx)
+                                        .or_insert((None, Vec::new()))
+                                        .1
+                                        .push(rect);
+                                }
+                            }
+                        }
+                    }
+
+                    // Last page: from 0 to last.word_index
+                    if let Some(text_map) = cache.get(last.page_index) {
+                        let x_offset = get_x_offset(last.page_index);
+                        for idx in 0..=last.word_index {
+                            if let Some(word) = text_map.get_word(idx) {
+                                let rect = HighlightRect::from_pdf_bounds(
+                                    &word.bounds,
+                                    text_map.page_width,
+                                    text_map.page_height,
+                                    x_offset,
+                                    render_width,
+                                );
+                                page_highlights
+                                    .entry(last.page_index)
                                     .or_insert((None, Vec::new()))
                                     .1
                                     .push(rect);
@@ -1302,36 +1329,18 @@ impl EyersWindow {
                         }
                     }
                 }
+            }
 
-                // Last page: from 0 to last.word_index
-                if let Some(text_map) = cache.get(last.page_index) {
-                    let x_offset = get_x_offset(last.page_index);
-                    for idx in 0..=last.word_index {
-                        if let Some(word) = text_map.get_word(idx) {
-                            let rect = HighlightRect::from_pdf_bounds(
-                                &word.bounds,
-                                text_map.page_width,
-                                text_map.page_height,
-                                x_offset,
-                                render_width,
-                            );
-                            page_highlights
-                                .entry(last.page_index)
-                                .or_insert((None, Vec::new()))
-                                .1
-                                .push(rect);
-                        }
-                    }
+            // Apply highlights to overlays
+            for (page_index, (cursor_rect, selection_rects)) in page_highlights {
+                if let Some(overlay) = imp.pdf_view.highlight_overlay(page_index) {
+                    overlay.set_highlights(cursor_rect, selection_rects);
                 }
             }
-        }
+        } // cache borrow is dropped here
 
-        // Apply highlights to overlays
-        for (page_index, (cursor_rect, selection_rects)) in page_highlights {
-            if let Some(overlay) = imp.pdf_view.highlight_overlay(page_index) {
-                overlay.set_highlights(cursor_rect, selection_rects);
-            }
-        }
+        // Now update annotation highlights with the current offset values
+        self.update_annotation_highlights();
     }
 
     /// Ensure the cursor is visible, auto-scrolling if needed
@@ -1766,6 +1775,15 @@ impl EyersWindow {
             let current_page = imp.pdf_view.current_page();
             imp.toc_panel.select_current_chapter(current_page);
         }
+
+        // Update annotation positions after layout changes from panel toggle
+        // Use idle callback to wait for layout to settle
+        let window_weak = self.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(window) = window_weak.upgrade() {
+                window.update_annotation_highlights();
+            }
+        });
     }
 
     fn toggle_header_bar(&self) {

@@ -71,6 +71,9 @@ impl SettingsWindow {
     fn setup_widgets(&self) {
         let imp = self.imp();
 
+        // Style the window itself
+        self.add_css_class("settings-window");
+
         // Main container
         let main_box = Box::builder()
             .orientation(Orientation::Vertical)
@@ -80,20 +83,25 @@ impl SettingsWindow {
             .margin_top(24)
             .margin_bottom(24)
             .build();
+        main_box.add_css_class("settings-content");
 
         // Language section
         let lang_box = Box::builder()
             .orientation(Orientation::Horizontal)
             .spacing(12)
             .build();
+        lang_box.add_css_class("settings-lang-row");
 
         let lang_label = Label::builder()
             .label("Dictionary Language:")
             .halign(gtk::Align::Start)
             .hexpand(true)
             .build();
+        lang_label.add_css_class("settings-lang-label");
 
         lang_box.append(&lang_label);
+        imp.language_dropdown
+            .add_css_class("settings-lang-dropdown");
         lang_box.append(&imp.language_dropdown);
 
         // Description label
@@ -103,6 +111,7 @@ impl SettingsWindow {
             .wrap(true)
             .css_classes(["dim-label"])
             .build();
+        desc_label.add_css_class("settings-description");
 
         main_box.append(&lang_box);
         main_box.append(&desc_label);
@@ -113,6 +122,7 @@ impl SettingsWindow {
             .halign(gtk::Align::End)
             .margin_top(8)
             .build();
+        close_button.add_css_class("settings-close-btn");
 
         let window_weak = self.downgrade();
         close_button.connect_clicked(move |_| {

@@ -55,6 +55,9 @@ impl EyersHeaderBar {
     fn setup_widgets(&self) {
         let imp = self.imp();
 
+        // Style the header bar itself
+        imp.header_bar.add_css_class("eyers-headerbar");
+
         // Mode label (left side, before open button)
         imp.mode_label.set_label("NORMAL");
         imp.mode_label.add_css_class("mode-label");
@@ -65,18 +68,21 @@ impl EyersHeaderBar {
         imp.header_bar.pack_start(&imp.pages_indicator_label);
 
         // Configure the header bar
-        imp.header_bar
-            .set_title_widget(Some(&gtk::Label::new(Some("Eyers PDF"))));
+        let title_label = gtk::Label::new(Some("Eyers PDF"));
+        title_label.add_css_class("header-title");
+        imp.header_bar.set_title_widget(Some(&title_label));
         imp.header_bar.set_show_title_buttons(true);
 
         // Open PDF button
         imp.open_button.set_label("Open PDF");
+        imp.open_button.add_css_class("header-open-btn");
         imp.header_bar.pack_start(&imp.open_button);
 
         // Translate toggle button (disabled for now - TODO: implement translation feature)
         // imp.translate_toggle.set_label("Translate");
         // imp.translate_toggle.set_active(false);
         // imp.translate_toggle.set_sensitive(false);
+        // imp.translate_toggle.add_css_class("header-translate-toggle");
         // imp.translate_toggle
         //     .set_tooltip_text(Some("Translation feature coming soon"));
         // imp.header_bar.pack_end(&imp.translate_toggle);
@@ -84,17 +90,21 @@ impl EyersHeaderBar {
         // Settings button (gear icon)
         imp.settings_button.set_icon_name("emblem-system-symbolic");
         imp.settings_button.set_tooltip_text(Some("Settings"));
+        imp.settings_button.add_css_class("header-settings-btn");
         imp.header_bar.pack_end(&imp.settings_button);
 
         // Definitions toggle button
         imp.definitions_toggle.set_label("Definitions");
         imp.definitions_toggle.set_active(false);
+        imp.definitions_toggle
+            .add_css_class("header-definitions-toggle");
         imp.header_bar.pack_end(&imp.definitions_toggle);
 
         // Annotate button (note-taking icon)
         imp.annotate_button.set_icon_name("document-edit-symbolic");
         imp.annotate_button
             .set_tooltip_text(Some("Add annotation (a)"));
+        imp.annotate_button.add_css_class("header-annotate-btn");
         imp.annotate_button.set_sensitive(false); // Disabled until in visual mode with selection
         imp.header_bar.pack_end(&imp.annotate_button);
 

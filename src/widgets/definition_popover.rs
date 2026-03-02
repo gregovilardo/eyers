@@ -52,6 +52,7 @@ impl DefinitionPopover {
         self.set_has_arrow(true);
         self.set_autohide(false);
         self.set_position(gtk::PositionType::Bottom);
+        self.add_css_class("definition-popover");
 
         let label = Label::builder()
             .label("Loading definition...")
@@ -60,6 +61,7 @@ impl DefinitionPopover {
             .yalign(0.0)
             .selectable(true)
             .build();
+        label.add_css_class("definition-text");
 
         let scroller = ScrolledWindow::builder()
             .hscrollbar_policy(PolicyType::Never)
@@ -69,6 +71,7 @@ impl DefinitionPopover {
             .min_content_height(POPOVER_HEIGHT)
             .child(&label)
             .build();
+        scroller.add_css_class("definition-scroller");
 
         let close_button = self.create_close_button();
 
@@ -80,6 +83,7 @@ impl DefinitionPopover {
             .margin_top(8)
             .margin_bottom(8)
             .build();
+        container.add_css_class("definition-container");
 
         container.append(&scroller);
         container.append(&close_button);
@@ -92,6 +96,7 @@ impl DefinitionPopover {
 
     fn create_close_button(&self) -> Button {
         let button = Button::builder().label("Close").margin_top(8).build();
+        button.add_css_class("definition-close-btn");
         let popover_weak = self.downgrade();
 
         button.connect_clicked(move |_| {

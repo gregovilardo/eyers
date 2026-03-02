@@ -10,8 +10,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::modes::{
-    AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
-    handle_post_global_key, handle_pre_global_key, handle_toc_key, handle_visual_mode_key,
+    handle_normal_mode_key, handle_post_global_key, handle_pre_global_key, handle_toc_key,
+    handle_visual_mode_key, AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor,
 };
 use crate::services::annotations::find_next_annotation_at_position;
 use crate::services::annotations::find_prev_annotation_at_position;
@@ -19,7 +19,7 @@ use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
 use crate::text_map::NavDirection;
-use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
+use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
 use crate::widgets::toc_panel::TocMode;
 use crate::widgets::{
     AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, StatusBar, TocPanel,
@@ -180,12 +180,14 @@ impl EyersWindow {
             .hexpand(true)
             .child(&imp.pdf_view)
             .build();
+        scrolled_window.add_css_class("pdf-scrolled-window");
 
         imp.scrolled_window.replace(Some(scrolled_window.clone()));
 
         let paned = Paned::builder()
             .orientation(Orientation::Horizontal)
             .build();
+        paned.add_css_class("eyers-paned");
         paned.set_wide_handle(true);
         paned.set_start_child(Some(&scrolled_window));
         paned.set_end_child(Some(&imp.toc_panel));
@@ -198,6 +200,7 @@ impl EyersWindow {
         imp.paned.replace(Some(paned.clone()));
 
         let main_box = Box::builder().orientation(Orientation::Vertical).build();
+        main_box.add_css_class("eyers-main-content");
 
         main_box.append(&paned);
 

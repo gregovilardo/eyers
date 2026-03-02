@@ -1,117 +1,414 @@
-/* Eyers PDF Reader Styles */
+/* ============================================
+   Eyers PDF Reader - Style Sheet
+   ============================================ */
 
-/* Mode label in header bar */
+/* ============================================
+   COLOR PALETTE - Change these to restyle the app!
+   ============================================
+   
+   Edit the colors below to customize Eyers' appearance.
+   All colors throughout the stylesheet use these variables,
+   so changing them here updates the entire application.
+   
+   Examples:
+   - Purple accent: #764ba2
+   - Green accent: #26a269  
+   - Orange accent: #f59f00
+   - Red accent: #e01b24
+*/
+
+@define-color eyers_accent #3584e4;
+/* Main accent color (blue by default) */
+@define-color eyers_accent_bg #3584e4;
+/* Accent background */
+@define-color eyers_accent_fg #ffffff;
+/* Text on accent background */
+@define-color eyers_accent_dim rgba(53, 132, 228, 0.6);
+/* Dimmed accent */
+
+@define-color eyers_bg @window_bg_color;
+/* Main window background */
+@define-color eyers_view_bg @view_bg_color;
+/* View/content background */
+@define-color eyers_view_hover @view_hover_bg_color;
+/* Hover state for views */
+@define-color eyers_header_bg @headerbar_bg_color;
+/* Header bar background */
+@define-color eyers_border @borders;
+/* Standard borders */
+
+@define-color eyers_surface #303030;
+/* Dark surface (toast, status bar) */
+@define-color eyers_surface_border #505050;
+/* Dark surface borders */
+@define-color eyers_surface_text #ffffff;
+/* Text on dark surfaces */
+
+@define-color eyers_success #2ec27e;
+/* Success/checkmark color (green) */
+@define-color eyers_warning #ffcc00;
+/* Warning/status color (yellow) */
+@define-color eyers_danger #e01b24;
+/* Danger/delete color (red) */
+
+@define-color eyers_text #121212;
+/* Main text color */
+@define-color eyers_text_dim @dim_label_fg_color;
+/* Dimmed/secondary text */
+
+/* ============================================
+   HEADER BAR
+   ============================================ */
+
+label {
+    color: @eyers_text;
+}
+
+.eyers-headerbar {
+    background: @eyers_header_bg;
+}
+
+.header-title {
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
 .mode-label {
     font-weight: bold;
     padding: 4px 12px;
-    border-radius: 4px;
+    border-radius: 6px;
     font-size: 0.9em;
+    background: @eyers_bg;
+    color: @eyers_text;
+    transition: all 200ms ease-in-out;
 }
 
-/* TOC Panel */
+.pages-indicator-label {
+    font-size: 0.9em;
+    opacity: 0.8;
+    margin-start: 8px;
+}
+
+.header-open-btn,
+.header-settings-btn,
+.header-annotate-btn {
+    transition: all 150ms ease-in-out;
+}
+
+.header-open-btn:hover,
+.header-settings-btn:hover,
+.header-annotate-btn:hover {
+    background: @headerbar_shade_color;
+}
+
+.header-definitions-toggle,
+.header-translate-toggle {
+    transition: all 150ms ease-in-out;
+}
+
+.header-definitions-toggle:checked,
+.header-translate-toggle:checked {
+    background: @eyers_accent_bg;
+    color: @eyers_accent_fg;
+}
+
+/* ============================================
+   MAIN LAYOUT
+   ============================================ */
+
+.eyers-main-content {
+    background: @eyers_bg;
+}
+
+.eyers-paned {
+    background: @eyers_bg;
+}
+
+.pdf-scrolled-window {
+    background: @eyers_view_bg;
+}
+
+.pdf-view {
+    background: @eyers_view_bg;
+}
+
+/* PDF page placeholder (unrendered pages) */
+.pdf-placeholder {
+    background-color: @eyers_view_bg;
+    border: 1px solid @eyers_border;
+}
+
+/* ============================================
+   TABLE OF CONTENTS PANEL
+   ============================================ */
+
 .toc-panel {
-    background-color: @window_bg_color;
-    border-right: 1px solid @borders;
+    background-color: @eyers_bg;
+    border-right: 1px solid @eyers_border;
+}
+
+.toc-header {
+    border-bottom: 1px solid @eyers_border;
+}
+
+.toc-close-btn {
+    opacity: 0.7;
+    transition: opacity 150ms ease-in-out;
+}
+
+.toc-close-btn:hover {
+    opacity: 1;
 }
 
 .toc-list {
     background: transparent;
 }
 
+.toc-chapter-row {
+    transition: background 150ms ease-in-out;
+}
+
+.toc-chapter-row:hover {
+    background: @eyers_view_hover;
+}
+
 .toc-title {
     padding: 8px 16px;
 }
 
-.toc-annotation-title {
-    padding: 8px 16px;
-    color: #28627d61;
+.toc-page-index {
+    color: @eyers_text_dim;
+    font-size: 0.9em;
 }
 
-toc-annotation-subtitle {
+/* Annotation rows in TOC */
+.toc-annotation-row {
+    transition: background 150ms ease-in-out;
+}
+
+.toc-annotation-title {
     padding: 8px 16px;
+    font-weight: 500;
+}
+
+.toc-subtitle {
+    padding: 8px 16px;
+    font-size: 1.0em;
+    opacity: 0.7;
 }
 
 list row:selected .toc-annotation-title {
-    color: #8adaff9e;
+    color: @eyers_accent;
 }
 
-.toc-page-index {
-    color: rgba(0, 0, 0, 0.5);
+.toc-annotation-edit-btn,
+.toc-annotation-delete-btn {
+    opacity: 0.6;
+    transition: opacity 150ms ease-in-out;
 }
 
-/* Translation Panel */
+.toc-annotation-edit-btn:hover,
+.toc-annotation-delete-btn:hover {
+    opacity: 1;
+}
+
+/* ============================================
+   TRANSLATION PANEL
+   ============================================ */
+
 .translation-panel {
-    background-color: @window_bg_color;
-    border-top: 1px solid @borders;
+    background-color: @eyers_bg;
+    border-top: 1px solid @eyers_border;
 }
 
 .translation-text {
     padding: 12px;
+    line-height: 1.5;
 }
 
-/* Toast Notification (in-app) */
+.translation-spinner {
+    color: @eyers_accent;
+}
+
+.translation-close-btn {
+    opacity: 0.7;
+    transition: opacity 150ms ease-in-out;
+}
+
+.translation-close-btn:hover {
+    opacity: 1;
+}
+
+/* ============================================
+   ANNOTATION PANEL
+   ============================================ */
+
+.annotation-panel {
+    background-color: @eyers_bg;
+    border-top: 1px solid @eyers_border;
+}
+
+.annotation-header {
+    border-bottom: 1px solid @eyers_border;
+    padding-bottom: 8px;
+}
+
+.annotation-for-label {
+    font-size: 0.9em;
+}
+
+.annotation-selected-text {
+    font-style: italic;
+    color: @eyers_accent;
+    font-weight: 500;
+}
+
+.annotation-input {
+    border: 1px solid @eyers_border;
+    border-radius: 6px;
+    padding: 8px;
+    background-color: @eyers_view_bg;
+    transition: border-color 150ms ease-in-out;
+}
+
+.annotation-input:focus {
+    border-color: @eyers_accent;
+}
+
+.annotation-scroll {
+    border: 1px solid @eyers_border;
+    border-radius: 6px;
+}
+
+.annotation-button-box {
+    padding-top: 4px;
+}
+
+.annotation-save-btn,
+.annotation-cancel-btn,
+.annotation-delete-btn {
+    transition: all 150ms ease-in-out;
+}
+
+/* ============================================
+   DEFINITION POPOVER
+   ============================================ */
+
+.definition-popover {
+    background: @eyers_view_bg;
+    border: 1px solid @eyers_border;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+}
+
+.definition-container {
+    background: @eyers_view_bg;
+}
+
+.definition-scroller {
+    border: 1px solid @eyers_border;
+    border-radius: 6px;
+    background: @eyers_view_bg;
+}
+
+.definition-text {
+    padding: 8px;
+    line-height: 1.5;
+}
+
+.definition-close-btn {
+    transition: all 150ms ease-in-out;
+}
+
+.definition-close-btn:hover {
+    background: @eyers_view_hover;
+}
+
+/* ============================================
+   SETTINGS WINDOW
+   ============================================ */
+
+.settings-window {
+    background: @eyers_bg;
+}
+
+.settings-content {
+    background: @eyers_bg;
+}
+
+.settings-lang-row {
+    padding: 12px;
+    border: 1px solid @eyers_border;
+    border-radius: 8px;
+    background: @eyers_view_bg;
+}
+
+.settings-lang-label {
+    font-weight: 500;
+}
+
+.settings-lang-dropdown {
+    min-width: 150px;
+}
+
+.settings-description {
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+
+.settings-close-btn {
+    transition: all 150ms ease-in-out;
+}
+
+/* ============================================
+   TOAST NOTIFICATIONS (IN-APP)
+   ============================================ */
+
 .toast-notification {
-    background-color: #303030;
-    color: #ffffff;
+    background-color: @eyers_surface;
+    color: @eyers_surface_text;
     border-radius: 8px;
     padding: 8px 16px;
     margin-top: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-    border: 1px solid #505050;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+    border: 1px solid @eyers_surface_border;
 }
 
 .toast-icon {
-    color: #2ec27e;
+    color: @eyers_success;
     min-width: 16px;
     min-height: 16px;
 }
 
 .toast-label {
     font-size: 0.95em;
-    color: #ffffff;
+    color: @eyers_surface_text;
 }
 
-/* PDF page placeholder (unrendered pages) */
-.pdf-placeholder {
-    background-color: #e0e0e0;
-}
+/* ============================================
+   STATUS BAR (PENDING KEY INPUT DISPLAY)
+   ============================================ */
 
-/* Annotation Panel */
-.annotation-panel {
-    background-color: @window_bg_color;
-    border-top: 1px solid @borders;
-}
-
-.annotation-selected-text {
-    font-style: italic;
-    color: @accent_color;
-}
-
-.annotation-input {
-    border: 1px solid @borders;
-    border-radius: 4px;
-    padding: 8px;
-    background-color: @view_bg_color;
-}
-
-.annotation-scroll {
-    border: 1px solid @borders;
-    border-radius: 4px;
-}
-
-/* Status Bar (pending key input display) */
 .status-bar {
-    background-color: #303030;
-    color: #ffffff;
+    background-color: @eyers_surface;
+    color: @eyers_surface_text;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-    border: 1px solid #505050;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+    border: 1px solid @eyers_surface_border;
 }
 
 .status-bar-label {
     font-family: monospace;
     font-weight: bold;
     font-size: 1.1em;
-    color: #ffcc00;
+    color: @eyers_warning;
     min-width: 40px;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.spacer {
+    opacity: 0.3;
 }

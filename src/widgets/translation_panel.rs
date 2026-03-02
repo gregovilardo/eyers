@@ -94,12 +94,14 @@ impl TranslationPanel {
 
         // Spinner (hidden by default)
         imp.spinner.set_visible(false);
+        imp.spinner.add_css_class("translation-spinner");
         content_box.append(&imp.spinner);
 
         // Close button
         imp.close_button.set_icon_name("window-close-symbolic");
         imp.close_button.set_valign(gtk::Align::Start);
         imp.close_button.add_css_class("flat");
+        imp.close_button.add_css_class("translation-close-btn");
         content_box.append(&imp.close_button);
 
         self.append(&content_box);

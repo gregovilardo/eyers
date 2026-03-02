@@ -141,6 +141,7 @@ impl PdfView {
     fn setup_widgets(&self) {
         self.set_orientation(Orientation::Vertical);
         self.set_spacing(10);
+        self.add_css_class("pdf-view");
         self.setup_scroll_tracking();
         self.setup_motion_tracking();
     }

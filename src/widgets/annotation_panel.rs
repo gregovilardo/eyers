@@ -117,9 +117,11 @@ impl AnnotationPanel {
             .orientation(Orientation::Horizontal)
             .spacing(8)
             .build();
+        header_box.add_css_class("annotation-header");
 
         let annotation_label = Label::new(Some("Annotation for:"));
         annotation_label.add_css_class("dim-label");
+        annotation_label.add_css_class("annotation-for-label");
         header_box.append(&annotation_label);
 
         imp.selected_text_label
@@ -150,20 +152,24 @@ impl AnnotationPanel {
             .spacing(8)
             .halign(gtk::Align::End)
             .build();
+        button_box.add_css_class("annotation-button-box");
 
         // Delete button (left-aligned, only visible when editing)
         imp.delete_button.set_label("Delete");
         imp.delete_button.add_css_class("destructive-action");
+        imp.delete_button.add_css_class("annotation-delete-btn");
         imp.delete_button.set_visible(false);
         imp.delete_button.set_halign(gtk::Align::Start);
         imp.delete_button.set_hexpand(true);
 
         // Cancel button
         imp.cancel_button.set_label("Cancel");
+        imp.cancel_button.add_css_class("annotation-cancel-btn");
 
         // Save button
         imp.save_button.set_label("Save");
         imp.save_button.add_css_class("suggested-action");
+        imp.save_button.add_css_class("annotation-save-btn");
 
         button_box.append(&imp.delete_button);
         button_box.append(&imp.cancel_button);

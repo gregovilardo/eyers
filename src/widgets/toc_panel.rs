@@ -3,13 +3,13 @@ use crate::objects::annotation_object::AnnotationObject;
 use crate::services::annotations::Annotation;
 use glib::signal::SignalHandlerId;
 use glib::subclass::Signal;
-use gtk::glib;
-use gtk::prelude::*;
-use gtk::subclass::prelude::*;
 use gtk::CustomSorter;
 use gtk::ListView;
 use gtk::Stack;
-use gtk::{gio, Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow};
+use gtk::glib;
+use gtk::prelude::*;
+use gtk::subclass::prelude::*;
+use gtk::{Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, gio};
 use std::cell::{Cell, OnceCell, RefCell};
 use std::sync::OnceLock;
 
@@ -136,6 +136,7 @@ impl TocChapterRow {
             .margin_bottom(4)
             .hexpand(true)
             .build();
+        container.add_css_class("toc-chapter-row");
 
         let label = Label::new(Some(title));
         label.set_xalign(0.0);
@@ -199,7 +200,7 @@ impl TocAnnotationRow {
         imp.title.add_css_class("toc-annotation-title");
         sub_container.append(&imp.title);
 
-        imp.subtitle.set_xalign(0.1);
+        imp.subtitle.set_xalign(0.05);
         imp.subtitle.add_css_class("toc-subtitle");
         sub_container.append(&imp.subtitle);
 
@@ -219,12 +220,14 @@ impl TocAnnotationRow {
         // Setup edit button
         imp.edit_button.set_icon_name("document-edit-symbolic");
         imp.edit_button.add_css_class("flat");
+        imp.edit_button.add_css_class("toc-annotation-edit-btn");
         imp.edit_button.set_can_shrink(true);
         imp.button_box.append(&imp.edit_button);
 
         // Setup delete button
         imp.delete_button.set_icon_name("edit-delete-symbolic");
         imp.delete_button.add_css_class("flat");
+        imp.delete_button.add_css_class("toc-annotation-delete-btn");
         imp.delete_button.set_can_shrink(true);
         imp.button_box.append(&imp.delete_button);
 
@@ -270,7 +273,7 @@ impl TocPanel {
 
         self.set_orientation(Orientation::Vertical);
         self.set_spacing(0);
-        self.set_size_request(250, -1);
+        self.set_size_request(400, -1);
         self.set_visible(false);
 
         let header_box = Box::builder()
@@ -281,6 +284,7 @@ impl TocPanel {
             .margin_top(12)
             .margin_bottom(8)
             .build();
+        header_box.add_css_class("toc-header");
 
         let title_label = &self.imp().title;
         title_label.set_text("Chapters");
@@ -290,6 +294,7 @@ impl TocPanel {
 
         imp.close_button.set_icon_name("window-close-symbolic");
         imp.close_button.add_css_class("flat");
+        imp.close_button.add_css_class("toc-close-btn");
         header_box.append(&imp.close_button);
 
         self.append(&header_box);

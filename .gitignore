@@ -2,3 +2,5 @@
 
 .out
 .opencode
+.AGENTS
+libpdfium.so

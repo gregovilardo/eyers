@@ -38,7 +38,6 @@ fn main() -> glib::ExitCode {
     // Handle opening files from command line
     app.connect_open(|app, files, _| {
         let window = EyersWindow::new(app);
-        println!("GHO");
 
         if let Some(file) = files.first() {
             if let Some(path) = file.path() {

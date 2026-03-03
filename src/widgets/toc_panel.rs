@@ -3,13 +3,13 @@ use crate::objects::annotation_object::AnnotationObject;
 use crate::services::annotations::Annotation;
 use glib::signal::SignalHandlerId;
 use glib::subclass::Signal;
-use gtk::CustomSorter;
-use gtk::ListView;
-use gtk::Stack;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, gio};
+use gtk::CustomSorter;
+use gtk::ListView;
+use gtk::Stack;
+use gtk::{gio, Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow};
 use std::cell::{Cell, OnceCell, RefCell};
 use std::sync::OnceLock;
 
@@ -141,6 +141,8 @@ impl TocChapterRow {
         let label = Label::new(Some(title));
         label.set_xalign(0.0);
         label.set_hexpand(true);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.set_max_width_chars(1);
         label.add_css_class("toc-title");
         container.append(&label);
 
@@ -197,10 +199,14 @@ impl TocAnnotationRow {
             .build();
 
         imp.title.set_xalign(0.0);
+        imp.title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        imp.title.set_max_width_chars(1);
         imp.title.add_css_class("toc-annotation-title");
         sub_container.append(&imp.title);
 
         imp.subtitle.set_xalign(0.05);
+        imp.subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        imp.subtitle.set_max_width_chars(1);
         imp.subtitle.add_css_class("toc-subtitle");
         sub_container.append(&imp.subtitle);
 
@@ -273,7 +279,7 @@ impl TocPanel {
 
         self.set_orientation(Orientation::Vertical);
         self.set_spacing(0);
-        self.set_size_request(400, -1);
+        self.set_size_request(-1, -1);
         self.set_visible(false);
 
         let header_box = Box::builder()
@@ -289,6 +295,7 @@ impl TocPanel {
         let title_label = &self.imp().title;
         title_label.set_text("Chapters");
         title_label.set_hexpand(true);
+        title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title_label.add_css_class("heading");
         header_box.append(title_label);
 

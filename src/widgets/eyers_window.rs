@@ -10,8 +10,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::modes::{
-    handle_normal_mode_key, handle_post_global_key, handle_pre_global_key, handle_toc_key,
-    handle_visual_mode_key, AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor,
+    AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
+    handle_post_global_key, handle_pre_global_key, handle_toc_key, handle_visual_mode_key,
 };
 use crate::services::annotations::find_next_annotation_at_position;
 use crate::services::annotations::find_prev_annotation_at_position;
@@ -19,7 +19,7 @@ use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
 use crate::text_map::NavDirection;
-use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
+use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::toc_panel::TocMode;
 use crate::widgets::{
     AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, StatusBar, TocPanel,
@@ -163,6 +163,45 @@ impl EyersWindow {
         self.setup_open_button();
         self.setup_settings_button();
 
+        // Setup all widget components
+        self.setup_header_bar_bindings();
+        let main_box = self.setup_main_layout();
+        self.setup_panels_visibility(&main_box);
+        self.setup_overlay_structure(&main_box);
+
+        self.setup_key_handler_binding();
+        self.setup_toast();
+        self.setup_keyboard_controller();
+        self.setup_translation_panel();
+        self.setup_annotation_panel();
+        self.setup_annotate_button();
+        self.setup_toc_panel();
+        self.setup_scroll_tracking();
+        self.setup_drag_selection();
+        self.setup_page_indicator_label();
+        self.setup_highlight_update_on_resize();
+    }
+
+    fn setup_highlight_update_on_resize(&self) {
+        let area = Cell::new(0);
+        self.connect_realize(move |win| {
+            if let Some(surface) = win.surface() {
+                let last_area = area.clone();
+                let win = win.clone();
+                surface.connect_layout(move |_surface, width, height| {
+                    let current_area = width * height;
+                    if current_area != last_area.get() {
+                        win.update_highlights();
+                        last_area.set(current_area);
+                    }
+                });
+            }
+        });
+    }
+
+    fn setup_header_bar_bindings(&self) {
+        let imp = self.imp();
+
         imp.header_bar
             .bind_property("definitions-enabled", &imp.pdf_view, "definitions-enabled")
             .sync_create()
@@ -172,7 +211,12 @@ impl EyersWindow {
             .bind_property("translate-enabled", &imp.pdf_view, "translate-enabled")
             .sync_create()
             .build();
+    }
 
+    fn setup_main_layout(&self) -> gtk::Box {
+        let imp = self.imp();
+
+        // Scrolled window for PDF view
         let scrolled_window = ScrolledWindow::builder()
             .hscrollbar_policy(PolicyType::Automatic)
             .vscrollbar_policy(PolicyType::Automatic)
@@ -181,9 +225,9 @@ impl EyersWindow {
             .child(&imp.pdf_view)
             .build();
         scrolled_window.add_css_class("pdf-scrolled-window");
-
         imp.scrolled_window.replace(Some(scrolled_window.clone()));
 
+        // Horizontal paned container
         let paned = Paned::builder()
             .orientation(Orientation::Horizontal)
             .build();
@@ -192,46 +236,39 @@ impl EyersWindow {
         paned.set_start_child(Some(&scrolled_window));
         paned.set_end_child(Some(&imp.toc_panel));
         paned.set_resize_start_child(true);
-        paned.set_shrink_start_child(false);
-        paned.set_resize_end_child(false);
-        paned.set_shrink_end_child(false);
-        paned.set_position(800);
-
+        paned.set_shrink_start_child(true);
+        paned.set_resize_end_child(true);
+        paned.set_shrink_end_child(true);
+        paned.set_position(500);
         imp.paned.replace(Some(paned.clone()));
 
+        // Main vertical box
         let main_box = Box::builder().orientation(Orientation::Vertical).build();
         main_box.add_css_class("eyers-main-content");
-
         main_box.append(&paned);
+
+        return main_box;
+    }
+
+    fn setup_panels_visibility(&self, main_box: &gtk::Box) {
+        let imp = self.imp();
 
         imp.translation_panel.set_visible(false);
         main_box.append(&imp.translation_panel);
 
         imp.annotation_panel.set_visible(false);
         main_box.append(&imp.annotation_panel);
+    }
 
-        // Set up toast notification
-        self.setup_toast();
+    fn setup_overlay_structure(&self, main_box: &gtk::Box) {
+        let imp = self.imp();
 
-        // Create overlay for toast notifications and status bar
         let overlay = gtk::Overlay::new();
-        overlay.set_child(Some(&main_box));
+        overlay.set_child(Some(main_box));
         overlay.add_overlay(&imp.toast_revealer);
         overlay.add_overlay(&imp.status_bar);
 
         self.set_child(Some(&overlay));
-
-        // Bind key handler status-text to status bar
-        self.setup_key_handler_binding();
-
-        self.setup_keyboard_controller();
-        self.setup_translation_panel();
-        self.setup_annotation_panel();
-        self.setup_annotate_button();
-        self.setup_toc_panel();
-        self.setup_scroll_tracking();
-        self.setup_drag_selection();
-        self.setup_page_indicator_label();
     }
 
     /// Set up binding between KeyHandler and StatusBar
@@ -1779,12 +1816,10 @@ impl EyersWindow {
             imp.toc_panel.select_current_chapter(current_page);
         }
 
-        // Update annotation positions after layout changes from panel toggle
-        // Use idle callback to wait for layout to settle
         let window_weak = self.downgrade();
-        glib::idle_add_local_once(move || {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
             if let Some(window) = window_weak.upgrade() {
-                window.update_annotation_highlights();
+                window.update_highlights();
             }
         });
     }

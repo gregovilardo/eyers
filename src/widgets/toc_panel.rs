@@ -3,13 +3,13 @@ use crate::objects::annotation_object::AnnotationObject;
 use crate::services::annotations::Annotation;
 use glib::signal::SignalHandlerId;
 use glib::subclass::Signal;
-use gtk::glib;
-use gtk::prelude::*;
-use gtk::subclass::prelude::*;
 use gtk::CustomSorter;
 use gtk::ListView;
 use gtk::Stack;
-use gtk::{gio, Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow};
+use gtk::glib;
+use gtk::prelude::*;
+use gtk::subclass::prelude::*;
+use gtk::{Box, Button, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, gio};
 use std::cell::{Cell, OnceCell, RefCell};
 use std::sync::OnceLock;
 
@@ -143,7 +143,7 @@ impl TocChapterRow {
         label.set_hexpand(true);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.set_max_width_chars(1);
-        label.add_css_class("toc-title");
+        label.add_css_class("toc-chapter-title");
         container.append(&label);
 
         let label = Label::new(Some(&page_index.to_string()));
@@ -722,7 +722,6 @@ impl TocPanel {
                 let current_pos = selection_model.selected();
                 let n_items = model.n_items();
                 if n_items > 0 && current_pos < n_items - 1 {
-                    println!("seleccionando posicion {current_pos}+1");
                     selection_model.select_item(current_pos + 1, true);
                     selection_model.set_selected(current_pos + 1);
                     imp.list_view_annotations.scroll_to(

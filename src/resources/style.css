@@ -147,9 +147,9 @@ label {
     border-right: 1px solid @eyers_border;
 }
 
-.toc-header {
-    border-bottom: 1px solid @eyers_border;
-}
+/* .toc-header { */
+/*     border-bottom: 1px solid @eyers_border; */
+/* } */
 
 .toc-close-btn {
     opacity: 0.7;
@@ -161,7 +161,7 @@ label {
 }
 
 .toc-list {
-    background: transparent;
+    background: white;
 }
 
 .toc-chapter-row {
@@ -172,14 +172,23 @@ label {
     background: @eyers_view_hover;
 }
 
-.toc-title {
+.toc-chapter-title {
     padding: 8px 16px;
 }
 
-.toc-page-index {
+list row:selected .toc-chapter-title {
     color: @eyers_text_dim;
+}
+
+.toc-page-index {
+    color: @eyers_text;
     font-size: 0.9em;
 }
+
+list row:selected .toc-page-index {
+    color: @eyers_text_dim;
+}
+
 
 /* Annotation rows in TOC */
 .toc-annotation-row {
@@ -189,6 +198,16 @@ label {
 .toc-annotation-title {
     padding: 8px 16px;
     font-weight: 500;
+}
+
+listview row:selected .toc-annotation-title,
+listview row:selected .toc-page-index {
+    color: @eyers_text_dim;
+}
+
+/* separador  */
+listview row:not(:last-child) {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .toc-subtitle {
@@ -269,6 +288,7 @@ list row:selected .toc-annotation-title {
     padding: 8px;
     background-color: @eyers_view_bg;
     transition: border-color 150ms ease-in-out;
+    font-size: 1.4em;
 }
 
 .annotation-input:focus {
@@ -288,6 +308,11 @@ list row:selected .toc-annotation-title {
 .annotation-cancel-btn,
 .annotation-delete-btn {
     transition: all 150ms ease-in-out;
+}
+
+.annotation-delete-btn label,
+.annotation-save-btn label {
+    color: @eyers_text_dim;
 }
 
 /* ============================================

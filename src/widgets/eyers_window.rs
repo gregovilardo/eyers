@@ -458,7 +458,6 @@ impl EyersWindow {
             if let Some(window) = window_weak.upgrade() {
                 let imp = window.imp();
                 let is_toc_visible = imp.toc_panel.is_visible();
-                println!("is_toc_visible {is_toc_visible}");
                 if is_toc_visible {
                     match handle_toc_key(&imp.key_handler, key, modifiers, imp.toc_panel.toc_mode())
                     {

@@ -3,6 +3,7 @@
 ## What is Eyers?
 
 Eyers is a PDF reader with vim-style keyboard navigation and built-in dictionary lookup for language learning. You can navigate documents using keyboard commands, look up word definitions, and save annotations that persist across sessions.
+Probably i'm not following true vim-motions in any right way, please don't be mad.
 
 ## Installation
 
@@ -169,9 +170,24 @@ Stores your highlights and notes. Each annotation contains:
 - Your note
 - Timestamps
 
+## TODO
+
+- [ ] Translations capabilities
+- [ ] Different highlight colors for diferent categories 
+- [ ] LaTEX rendering while taking annotations
+- [ ] Copy LaTEX from pdf
+- [ ] Add more vim navigation (like Ctrl-o/Ctrl-i, marks, etc)
+- [ ] Identify words when they are separate by hyphens
+- [ ] Search text in the pdf (!important)
+- [ ] Grammar correction on annotations
+- [ ] Search definitions inside the popover of definitions
+
 ## Known Issues
 
 - The cursor can occasionally get stuck when scrolling down in Visual mode. Go to Normal mode, go down and re-enter Visual mode if this happens.
 - Text order may be incorrect in PDFs with complex layouts.
 - Zoom is to slow. 
 - In visual mode when zoomed the display dosn't update to the sides.
+- If annotation panel gets unfocused then Esc dosn't work to leave the panel.
+- In certain pdfs, the text selected gets weird spacing.
+- In certain pdfs, selecting crosspage text removes all spacing (!important).

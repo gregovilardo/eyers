@@ -18,7 +18,6 @@ use crate::services::annotations::find_prev_annotation_at_position;
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::NavDirection;
 use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::toc_panel::TocMode;
 use crate::widgets::{

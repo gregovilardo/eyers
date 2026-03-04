@@ -26,7 +26,7 @@
 @define-color eyers_accent_dim rgba(53, 132, 228, 0.6);
 /* Dimmed accent */
 
-@define-color eyers_bg @window_bg_color;
+@define-color eyers_bg #F6F5F4;
 /* Main window background */
 @define-color eyers_view_bg @view_bg_color;
 /* View/content background */

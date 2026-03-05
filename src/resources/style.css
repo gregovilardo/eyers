@@ -16,7 +16,7 @@
 
 /* separador  */
 listview row:not(:last-child) {
-    border-bottom: 1px solid grey;
+    border-bottom: 1px solid alpha(@theme_fg_color, 0.15);
 }
 
 .toc-subtitle {
@@ -45,9 +45,31 @@ listview row:not(:last-child) {
     font-size: 1.1em;
 }
 
-/* ============================================
-   UTILITY CLASSES
-   ============================================ */
+.annotation-panel {
+    background-color: @theme_bg_color;
+    border-top: 1px solid alpha(@theme_fg_color, 0.15);
+}
+
+
+.annotation-for-label {
+    font-size: 0.9em;
+}
+
+.annotation-selected-text {
+    font-style: italic;
+    color: @theme_fg_color;
+    font-weight: 500;
+}
+
+.annotation-input {
+    border: 1px solid alpha(@theme_fg_color, 0.15);
+    border-radius: 6px;
+    padding: 8px;
+    background-color: @theme_base_color;
+    transition: border-color 150ms ease-in-out;
+    font-size: 1.15em;
+    color: @theme_text_color;
+}
 
 .spacer {
     opacity: 0.3;

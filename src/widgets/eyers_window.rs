@@ -10,19 +10,19 @@ use std::fs;
 use std::path::Path;
 
 use crate::modes::{
-    AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
-    handle_post_global_key, handle_pre_global_key, handle_toc_key, handle_visual_mode_key,
+    handle_normal_mode_key, handle_post_global_key, handle_pre_global_key, handle_toc_key,
+    handle_visual_mode_key, AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor,
 };
 use crate::services::annotations::find_next_annotation_at_position;
 use crate::services::annotations::find_prev_annotation_at_position;
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
+use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
 use crate::widgets::toc_panel::TocMode;
 use crate::widgets::{
-    AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, SettingsWindow, StatusBar, TocPanel,
-    TranslationPanel,
+    AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, PendingKeyBox, SettingsWindow,
+    StatusBar, TocPanel, TranslationPanel,
 };
 
 const DEFAULT_VIEWPORT_OFFSET: f64 = 0.2;
@@ -35,10 +35,12 @@ pub(super) struct MouseSelectionState {
 }
 
 mod imp {
+
     use super::*;
 
     pub struct EyersWindow {
         pub header_bar: EyersHeaderBar,
+        pub status_bar: StatusBar,
         pub pdf_view: PdfView,
         pub toc_panel: TocPanel,
         pub scrolled_window: RefCell<Option<ScrolledWindow>>,
@@ -54,8 +56,8 @@ mod imp {
         pub toast_label: gtk::Label,
         /// Key handler for managing input state
         pub key_handler: KeyHandler,
-        /// Status bar for displaying pending input
-        pub status_bar: StatusBar,
+        /// Floating box for displaying pending key input
+        pub pendingkey_box: PendingKeyBox,
         /// Dictionary language setting
         pub dictionary_language: Cell<Language>,
         /// Current PDF file path (for annotations)
@@ -81,6 +83,7 @@ mod imp {
 
             Self {
                 header_bar: EyersHeaderBar::new(),
+                status_bar: StatusBar::new(),
                 pdf_view: PdfView::new(),
                 toc_panel: TocPanel::new(),
                 scrolled_window: RefCell::new(None),
@@ -93,7 +96,7 @@ mod imp {
                 toast_revealer,
                 toast_label,
                 key_handler: KeyHandler::new(),
-                status_bar: StatusBar::new(),
+                pendingkey_box: PendingKeyBox::new(),
                 dictionary_language: Cell::new(Language::default()),
                 current_pdf_path: RefCell::new(None),
                 annotations: RefCell::new(Vec::new()),
@@ -246,6 +249,8 @@ impl EyersWindow {
         main_box.add_css_class("eyers-main-content");
         main_box.append(&paned);
 
+        main_box.append(imp.status_bar.widget());
+
         return main_box;
     }
 
@@ -265,20 +270,20 @@ impl EyersWindow {
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(main_box));
         overlay.add_overlay(&imp.toast_revealer);
-        overlay.add_overlay(&imp.status_bar);
+        overlay.add_overlay(&imp.pendingkey_box);
 
         self.set_child(Some(&overlay));
     }
 
-    /// Set up binding between KeyHandler and StatusBar
+    /// Set up binding between KeyHandler and PendingKeyBox
     fn setup_key_handler_binding(&self) {
         let imp = self.imp();
-        let status_bar = imp.status_bar.clone();
+        let pending_key_box = imp.pendingkey_box.clone();
 
         imp.key_handler
             .connect_notify_local(Some("status-text"), move |handler, _| {
                 let text = handler.status_text();
-                status_bar.set_status_text(&text);
+                pending_key_box.set_pendingkey_text(&text);
             });
     }
 
@@ -1175,11 +1180,11 @@ impl EyersWindow {
         None
     }
 
-    /// Update the mode label in the header bar
+    /// Update the mode label in the status bar
     fn update_mode_display(&self) {
         let imp = self.imp();
         let mode = imp.app_mode.borrow();
-        imp.header_bar.set_mode_text(mode.display_name());
+        imp.status_bar.set_mode_text(mode.display_name());
 
         // Enable/disable annotate button based on mode
         let is_visual = mode.is_visual();
@@ -1829,6 +1834,13 @@ impl EyersWindow {
         header.set_visible(!is_visible);
     }
 
+    fn toggle_status_bar(&self) {
+        let imp = self.imp();
+        let status_bar = imp.status_bar.widget();
+        let is_visible = status_bar.is_visible();
+        status_bar.set_visible(!is_visible);
+    }
+
     fn setup_open_button(&self) {
         let window_weak = self.downgrade();
 
@@ -2080,13 +2092,13 @@ impl EyersWindow {
     }
 
     fn setup_page_indicator_label(&self) {
-        let header_bar = self.header_bar().clone();
+        let status_bar = self.imp().status_bar.clone();
         self.pdf_view().connect_closure(
             "current-page-updated",
             false,
             closure_local!(|_pdf_view: &PdfView, current_page: u32, total_pages: u32| {
                 let page_indicator_text = format!("[{current_page}/{total_pages}]");
-                header_bar.set_pages_indicator_text(&page_indicator_text);
+                status_bar.set_pages_indicator_text(&page_indicator_text);
             }),
         );
     }

@@ -7,60 +7,31 @@ mod imp {
 
     #[derive(Default)]
     pub struct StatusBar {
-        pub label: gtk::Label,
+        pub center_box: gtk::CenterBox,
+        pub mode_label: gtk::Label,
+        pub pages_indicator_label: gtk::Label,
+        pub pdf_name: gtk::Label,
     }
 
     #[glib::object_subclass]
     impl ObjectSubclass for StatusBar {
         const NAME: &'static str = "EyersStatusBar";
         type Type = super::StatusBar;
-        type ParentType = gtk::Box;
+        type ParentType = gtk::Widget;
     }
 
     impl ObjectImpl for StatusBar {
         fn constructed(&self) {
             self.parent_constructed();
-
-            let obj = self.obj();
-
-            // Configure the box
-            obj.set_orientation(gtk::Orientation::Horizontal);
-            obj.set_halign(gtk::Align::Center);
-            obj.set_valign(gtk::Align::End);
-            obj.set_margin_bottom(12);
-
-            // Style the label
-            self.label.set_halign(gtk::Align::Center);
-            self.label.add_css_class("status-bar-label");
-
-            // Create inner box for styling
-            let inner_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            inner_box.add_css_class("status-bar");
-            inner_box.set_margin_start(16);
-            inner_box.set_margin_end(16);
-            inner_box.set_margin_top(8);
-            inner_box.set_margin_bottom(8);
-            inner_box.append(&self.label);
-
-            obj.append(&inner_box);
-
-            // Initially hidden
-            obj.set_visible(false);
+            self.obj().setup_widgets();
         }
     }
-
     impl WidgetImpl for StatusBar {}
-    impl BoxImpl for StatusBar {}
 }
 
 glib::wrapper! {
-    /// StatusBar displays the current pending key input state.
-    ///
-    /// Shows at the bottom of the window when there's pending input,
-    /// like "42g" when the user has typed 42 and then g, waiting for
-    /// the second g.
     pub struct StatusBar(ObjectSubclass<imp::StatusBar>)
-        @extends gtk::Box, gtk::Widget,
+        @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
 
@@ -75,19 +46,44 @@ impl StatusBar {
         glib::Object::builder().build()
     }
 
-    /// Set the status text to display
-    pub fn set_status_text(&self, text: &str) {
-        self.imp().label.set_text(text);
+    fn setup_widgets(&self) {
+        let imp = self.imp();
 
-        // Show/hide based on whether there's text
-        let should_show = !text.is_empty();
-        if self.is_visible() != should_show {
-            self.set_visible(should_show);
-        }
+        // Style the header bar itself
+        self.add_css_class("statusbar");
+        let center_box = &imp.center_box;
+        center_box.set_can_focus(false);
+        center_box.set_can_target(false);
+        center_box.set_hexpand(false);
+        center_box.set_vexpand(false);
+
+        // Mode label (left side, before open button)
+        imp.mode_label.set_label("NORMAL");
+        imp.mode_label.add_css_class("mode-label");
+        center_box.set_start_widget(Some(&imp.mode_label));
+
+        imp.pages_indicator_label
+            .add_css_class("pages-indicator-label");
+        center_box.set_end_widget(Some(&imp.pages_indicator_label));
     }
 
-    /// Get the current status text
-    pub fn status_text(&self) -> String {
-        self.imp().label.text().to_string()
+    pub fn widget(&self) -> &gtk::CenterBox {
+        &self.imp().center_box
+    }
+
+    pub fn mode_label(&self) -> &gtk::Label {
+        &self.imp().mode_label
+    }
+
+    pub fn set_mode_text(&self, mode: &str) {
+        self.imp().mode_label.set_label(mode);
+    }
+
+    pub fn set_pdf_name(&self, name: &str) {
+        self.imp().pdf_name.set_label(name);
+    }
+
+    pub fn set_pages_indicator_text(&self, text: &str) {
+        self.imp().pages_indicator_label.set_label(text);
     }
 }

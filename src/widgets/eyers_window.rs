@@ -10,15 +10,15 @@ use std::fs;
 use std::path::Path;
 
 use crate::modes::{
-    handle_normal_mode_key, handle_post_global_key, handle_pre_global_key, handle_toc_key,
-    handle_visual_mode_key, AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor,
+    AppMode, KeyAction, KeyHandler, KeyResult, ScrollDir, WordCursor, handle_normal_mode_key,
+    handle_post_global_key, handle_pre_global_key, handle_toc_key, handle_visual_mode_key,
 };
 use crate::services::annotations::find_next_annotation_at_position;
 use crate::services::annotations::find_prev_annotation_at_position;
 use crate::services::annotations::{self, Annotation};
 use crate::services::dictionary::Language;
 use crate::services::pdf_text::calculate_picture_offset;
-use crate::text_map::{find_word_on_line_starting_with, TextMapCache};
+use crate::text_map::{TextMapCache, find_word_on_line_starting_with};
 use crate::widgets::toc_panel::TocMode;
 use crate::widgets::{
     AnnotationPanel, EyersHeaderBar, HighlightRect, PdfView, PendingKeyBox, SettingsWindow,
@@ -1713,6 +1713,7 @@ impl EyersWindow {
         end: WordCursor,
     ) -> String {
         let mut text_parts: Vec<String> = Vec::new();
+        let mut is_first_word = true;
 
         if start.page_index == end.page_index {
             // Same page
@@ -1743,7 +1744,13 @@ impl EyersWindow {
             if let Some(text_map) = cache.get(first.page_index) {
                 for idx in first.word_index..text_map.word_count() {
                     if let Some(word) = text_map.get_word(idx) {
+                        if !is_first_word {
+                            if let Some(surr_left) = &word.surround_left {
+                                text_parts.push(surr_left.clone());
+                            }
+                        }
                         text_parts.push(word.text.clone());
+                        is_first_word = false;
                     }
                 }
             }
@@ -1753,6 +1760,9 @@ impl EyersWindow {
                 if let Some(text_map) = cache.get(page_idx) {
                     for idx in 0..text_map.word_count() {
                         if let Some(word) = text_map.get_word(idx) {
+                            if let Some(surr_left) = &word.surround_left {
+                                text_parts.push(surr_left.clone());
+                            }
                             text_parts.push(word.text.clone());
                         }
                     }
@@ -1763,6 +1773,9 @@ impl EyersWindow {
             if let Some(text_map) = cache.get(last.page_index) {
                 for idx in 0..=last.word_index {
                     if let Some(word) = text_map.get_word(idx) {
+                        if let Some(surr_left) = &word.surround_left {
+                            text_parts.push(surr_left.clone());
+                        }
                         text_parts.push(word.text.clone());
                     }
                 }

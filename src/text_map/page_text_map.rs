@@ -29,13 +29,23 @@ impl PageTextMap {
         // Extract all characters with their bounds
         let chars = text_page.chars();
         let mut char_data: Vec<CharData> = Vec::new();
-        // !TODO remove expect
-        let media_box = page.boundaries().media().expect("mediabox").bounds;
-        let crop_box = page
-            .boundaries()
+
+        let boundaries = page.boundaries();
+        let crop_box = boundaries
             .crop()
             .map(|b| b.bounds)
-            .unwrap_or(media_box);
+            .or_else(|_| boundaries.media().map(|b| b.bounds))
+            .or_else(|_| boundaries.trim().map(|b| b.bounds))
+            .or_else(|_| boundaries.bleed().map(|b| b.bounds))
+            .or_else(|_| boundaries.art().map(|b| b.bounds))
+            .unwrap_or_else(|_| {
+                pdfium_render::prelude::PdfRect::new(
+                    PdfPoints::new(0.0),
+                    PdfPoints::new(0.0),
+                    PdfPoints::new(0.0),
+                    PdfPoints::new(0.0),
+                )
+            });
 
         for char_obj in chars.iter() {
             if let (Some(unicode), Ok(bounds)) = (char_obj.unicode_char(), char_obj.tight_bounds())

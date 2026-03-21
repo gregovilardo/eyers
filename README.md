@@ -5,6 +5,9 @@
 Eyers is a PDF reader with vim-style keyboard navigation and built-in dictionary lookup for language learning. You can navigate documents using keyboard commands, look up word definitions, and save annotations that persist across sessions.
 Probably i'm not following true vim-motions in any right way, please don't be mad.
 
+/var/home/gvilardo/Videos/eyers.mp4
+sry the bad english
+
 ## Installation
 
 ### Requirements

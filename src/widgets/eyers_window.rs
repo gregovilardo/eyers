@@ -865,7 +865,9 @@ impl EyersWindow {
                             );
                         }
                     }
-                    self.move_cursor(new_cursor.expect("new_cursor"));
+                    if let Some(cursor) = new_cursor {
+                        self.move_cursor(cursor);
+                    }
                 }
             }
         }

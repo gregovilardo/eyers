@@ -33,7 +33,6 @@ listview row:not(:last-child) {
 }
 
 .pendingkey-label {
-    font-family: monospace;
     font-weight: bold;
     font-size: 1.1em;
     color: @theme_selected_bg_color;
